@@ -22,6 +22,15 @@ const TYPE_LABELS: Record<Transaction['type'], string> = {
   income: 'Receita',
 };
 
+const RECURRENCE_OPTIONS: Array<{
+  value: NonNullable<Transaction['recurrence_rule']>;
+  label: string;
+}> = [
+  { value: 'weekly', label: 'Semanal' },
+  { value: 'monthly', label: 'Mensal' },
+  { value: 'yearly', label: 'Anual' },
+];
+
 function getTodayDateValue() {
   const today = new Date();
   const year = today.getFullYear();
@@ -124,6 +133,10 @@ export function EntryScreen() {
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(getTodayDateValue());
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceRule, setRecurrenceRule] = useState<
+    NonNullable<Transaction['recurrence_rule']>
+  >('monthly');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [successToken, setSuccessToken] = useState(0);
@@ -253,8 +266,8 @@ export function EntryScreen() {
       category_id: selectedCategoryId,
       note: note.trim() ? note.trim() : null,
       date,
-      is_recurring: false,
-      recurrence_rule: null,
+      is_recurring: isRecurring,
+      recurrence_rule: isRecurring ? recurrenceRule : null,
       recurrence_parent_id: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -440,6 +453,67 @@ export function EntryScreen() {
           maxLength={120}
           className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
         />
+
+        <div className="mt-4 space-y-3 border-t border-[var(--color-divider)] pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-[var(--color-text)]">Recorrente</p>
+              <p className="text-xs text-[var(--color-text-secondary)]">
+                Crie repetições automáticas desta transação.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isRecurring}
+              onClick={() => {
+                setIsRecurring((currentValue) => {
+                  const nextValue = !currentValue;
+                  if (nextValue) {
+                    setRecurrenceRule('monthly');
+                  }
+                  return nextValue;
+                });
+              }}
+              className={`relative flex min-h-[44px] min-w-[44px] items-center rounded-full p-1 transition-colors ${
+                isRecurring
+                  ? 'bg-[var(--color-accent)]'
+                  : 'bg-[var(--color-bg-tertiary)]'
+              }`}
+            >
+              <span
+                className={`h-5 w-5 rounded-full bg-[var(--color-bg)] shadow-[var(--shadow-sm)] transition-transform ${
+                  isRecurring ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+              <span className="sr-only">Ativar transação recorrente</span>
+            </button>
+          </div>
+
+          {isRecurring && (
+            <div className="flex flex-wrap gap-2">
+              {RECURRENCE_OPTIONS.map((option) => {
+                const isActive = recurrenceRule === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRecurrenceRule(option.value)}
+                    aria-pressed={isActive}
+                    className={`min-h-[44px] rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">

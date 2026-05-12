@@ -16,6 +16,7 @@ import {
 } from '@/features/transactions/EditTransactionModal';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
 import { useAuth } from '@/hooks/useAuth';
+import { getRecurringOccurrenceDate } from '@/lib/recurringEngine';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
@@ -40,6 +41,8 @@ type PullGesture = {
   startX: number;
   startY: number;
 };
+
+type DeleteScope = 'single' | 'future' | null;
 
 function toLocalDate(dateValue: string) {
   return new Date(`${dateValue}T12:00:00`);
@@ -91,6 +94,146 @@ function getTransactionCategory(
   return categoryMap.get(transaction.category_id) ?? null;
 }
 
+function isRecurringParent(transaction: Transaction) {
+  return transaction.is_recurring && transaction.recurrence_parent_id === null;
+}
+
+function isRecurringTransaction(transaction: Transaction) {
+  return transaction.is_recurring || transaction.recurrence_parent_id !== null;
+}
+
+async function deleteTransaction(userId: string, transactionId: string) {
+  const { error } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('id', transactionId)
+    .eq('user_id', userId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function deleteSingleRecurringParent(userId: string, transaction: Transaction) {
+  if (!isRecurringParent(transaction)) {
+    await deleteTransaction(userId, transaction.id);
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('recurrence_parent_id', transaction.id)
+    .gt('date', transaction.date)
+    .order('date', { ascending: true });
+
+  if (error) {
+    throw error;
+  }
+
+  const futureChildren = (data ?? []) as Transaction[];
+
+  if (futureChildren.length === 0) {
+    if (!transaction.recurrence_rule) {
+      throw new Error('A transação recorrente não tem frequência definida.');
+    }
+
+    const { error: updateError } = await supabase
+      .from('transactions')
+      .update({
+        date: getRecurringOccurrenceDate(transaction.date, transaction.recurrence_rule),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', transaction.id)
+      .eq('user_id', userId);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    return;
+  }
+
+  const [nextParent, ...remainingChildren] = futureChildren;
+
+  if (!nextParent) {
+    throw new Error('Não foi possível encontrar a próxima ocorrência recorrente.');
+  }
+
+  if (!transaction.recurrence_rule) {
+    throw new Error('A transação recorrente não tem frequência definida.');
+  }
+
+  const timestamp = new Date().toISOString();
+
+  if (remainingChildren.length > 0) {
+    const { error: reparentError } = await supabase
+      .from('transactions')
+      .update({
+        recurrence_parent_id: nextParent.id,
+        updated_at: timestamp,
+      })
+      .in(
+        'id',
+        remainingChildren.map((child) => child.id)
+      )
+      .eq('user_id', userId);
+
+    if (reparentError) {
+      throw reparentError;
+    }
+  }
+
+  const { error: promoteError } = await supabase
+    .from('transactions')
+    .update({
+      is_recurring: true,
+      recurrence_rule: transaction.recurrence_rule,
+      recurrence_parent_id: null,
+      updated_at: timestamp,
+    })
+    .eq('id', nextParent.id)
+    .eq('user_id', userId);
+
+  if (promoteError) {
+    throw promoteError;
+  }
+
+  await deleteTransaction(userId, transaction.id);
+}
+
+async function deleteRecurringParentAndFuture(userId: string, transaction: Transaction) {
+  const timestamp = new Date().toISOString();
+
+  const { error: stopError } = await supabase
+    .from('transactions')
+    .update({
+      is_recurring: false,
+      recurrence_rule: null,
+      updated_at: timestamp,
+    })
+    .eq('id', transaction.id)
+    .eq('user_id', userId);
+
+  if (stopError) {
+    throw stopError;
+  }
+
+  const { error: childDeleteError } = await supabase
+    .from('transactions')
+    .delete()
+    .eq('user_id', userId)
+    .eq('recurrence_parent_id', transaction.id)
+    .gte('date', transaction.date);
+
+  if (childDeleteError) {
+    throw childDeleteError;
+  }
+
+  await deleteTransaction(userId, transaction.id);
+}
+
 export function TransactionListScreen() {
   const { user } = useAuth();
   const categories = useCategoryStore((state) => state.categories);
@@ -103,6 +246,7 @@ export function TransactionListScreen() {
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [openDeleteActionId, setOpenDeleteActionId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
+  const [deleteScope, setDeleteScope] = useState<DeleteScope>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -179,6 +323,8 @@ export function TransactionListScreen() {
 
   useEffect(() => {
     setOpenDeleteActionId(null);
+    setDeleteScope(null);
+    setPendingDelete(null);
   }, [selectedMonth, selectedCategoryIds]);
 
   useEffect(() => {
@@ -222,32 +368,37 @@ export function TransactionListScreen() {
   const handleDeleteRequest = (transaction: Transaction) => {
     setDeleteError(null);
     setOpenDeleteActionId(null);
+    setDeleteScope(isRecurringParent(transaction) ? null : 'single');
     setPendingDelete(transaction);
   };
 
   const handleConfirmDelete = async () => {
-    if (!user || !pendingDelete || isDeleting) {
+    if (!user || !pendingDelete || !deleteScope || isDeleting) {
       return;
     }
 
     const previousTransactions = transactions;
-    const nextTransactions = previousTransactions.filter(
-      (transaction) => transaction.id !== pendingDelete.id
-    );
+    const nextTransactions = previousTransactions.filter((transaction) => {
+      if (deleteScope === 'future' && pendingDelete.id === transaction.recurrence_parent_id) {
+        return false;
+      }
+
+      return transaction.id !== pendingDelete.id;
+    });
 
     setDeleteError(null);
     setIsDeleting(true);
     setTransactions(nextTransactions);
 
     try {
-      const { error } = await supabase
-        .from('transactions')
-        .delete()
-        .eq('id', pendingDelete.id)
-        .eq('user_id', user.id);
-
-      if (error) {
-        throw error;
+      if (isRecurringParent(pendingDelete)) {
+        if (deleteScope === 'future') {
+          await deleteRecurringParentAndFuture(user.id, pendingDelete);
+        } else {
+          await deleteSingleRecurringParent(user.id, pendingDelete);
+        }
+      } else {
+        await deleteTransaction(user.id, pendingDelete.id);
       }
 
       if (editingTransaction?.id === pendingDelete.id) {
@@ -255,6 +406,8 @@ export function TransactionListScreen() {
       }
 
       setPendingDelete(null);
+      setDeleteScope(null);
+      await refreshTransactions();
     } catch (error) {
       console.error('Erro ao eliminar transação:', error);
       setTransactions(previousTransactions);
@@ -306,6 +459,9 @@ export function TransactionListScreen() {
           category_id: values.category_id,
           note: values.note,
           date: values.date,
+          is_recurring: values.is_recurring,
+          recurrence_rule: values.recurrence_rule,
+          recurrence_parent_id: values.recurrence_parent_id,
           updated_at: updatedAt,
         })
         .eq('id', editingTransaction.id)
@@ -448,6 +604,20 @@ export function TransactionListScreen() {
         setOpenDeleteActionId(null);
       }
     };
+
+  const handleCloseDeleteDialog = () => {
+    if (isDeleting) {
+      return;
+    }
+
+    setDeleteError(null);
+    setDeleteScope(null);
+    setPendingDelete(null);
+  };
+
+  const isPendingDeleteRecurringParent = pendingDelete
+    ? isRecurringParent(pendingDelete)
+    : false;
 
   return (
     <div
@@ -634,7 +804,7 @@ export function TransactionListScreen() {
                             <span className="truncate text-sm font-semibold text-[var(--color-text)]">
                               {category?.name ?? 'Categoria removida'}
                             </span>
-                            {transaction.is_recurring && (
+                            {isRecurringTransaction(transaction) && (
                               <span
                                 className="shrink-0 text-sm text-[var(--color-text-secondary)]"
                                 aria-label="Transação recorrente"
@@ -692,10 +862,18 @@ export function TransactionListScreen() {
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
           <div className="w-full max-w-md rounded-[var(--radius-lg)] bg-[var(--color-bg)] p-5 shadow-[var(--shadow-md)]">
             <h3 className="text-lg font-semibold text-[var(--color-text)]">
-              Eliminar transação
+              {isPendingDeleteRecurringParent && deleteScope === null
+                ? 'Eliminar transação recorrente'
+                : 'Confirmar eliminação'}
             </h3>
             <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-              Eliminar esta transação?
+              {isPendingDeleteRecurringParent && deleteScope === null
+                ? 'Escolha o que pretende eliminar nesta série recorrente.'
+                : deleteScope === 'future'
+                  ? 'Esta ação elimina esta transação e todas as ocorrências futuras.'
+                  : isPendingDeleteRecurringParent
+                    ? 'Esta ação elimina apenas esta ocorrência e mantém as futuras.'
+                    : 'Eliminar esta transação?'}
             </p>
             <p className="mt-1 text-sm font-medium text-[var(--color-text)]">
               {formatCents(pendingDelete.amount_cents)} ·{' '}
@@ -708,31 +886,70 @@ export function TransactionListScreen() {
               </p>
             )}
 
-            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!isDeleting) {
-                    setDeleteError(null);
-                    setPendingDelete(null);
-                  }
-                }}
-                disabled={isDeleting}
-                className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleConfirmDelete();
-                }}
-                disabled={isDeleting}
-                className="min-h-[44px] rounded-[var(--radius-md)] bg-[var(--color-danger)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors disabled:opacity-50"
-              >
-                {isDeleting ? 'A eliminar…' : 'Eliminar'}
-              </button>
-            </div>
+            {isPendingDeleteRecurringParent && deleteScope === null ? (
+              <div className="mt-5 flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteScope('single')}
+                  disabled={isDeleting}
+                  className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                >
+                  Eliminar apenas esta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeleteScope('future')}
+                  disabled={isDeleting}
+                  className="min-h-[44px] rounded-[var(--radius-md)] bg-[var(--color-danger)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors disabled:opacity-50"
+                >
+                  Eliminar esta e todas as futuras
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseDeleteDialog}
+                  disabled={isDeleting}
+                  className="min-h-[44px] rounded-[var(--radius-md)] px-4 py-2.5 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+              </div>
+            ) : (
+              <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseDeleteDialog}
+                  disabled={isDeleting}
+                  className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                {isPendingDeleteRecurringParent && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isDeleting) {
+                        setDeleteError(null);
+                        setDeleteScope(null);
+                      }
+                    }}
+                    disabled={isDeleting}
+                    className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-2.5 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)] disabled:opacity-50"
+                  >
+                    Voltar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleConfirmDelete();
+                  }}
+                  disabled={isDeleting}
+                  className="min-h-[44px] rounded-[var(--radius-md)] bg-[var(--color-danger)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors disabled:opacity-50"
+                >
+                  {isDeleting ? 'A eliminar…' : 'Confirmar'}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

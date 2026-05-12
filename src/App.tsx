@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
 import { AppLayout } from '@/components/AppLayout';
@@ -6,14 +7,51 @@ import { EntryScreen } from '@/features/transactions/EntryScreen';
 import { TransactionListScreen } from '@/features/transactions/TransactionListScreen';
 import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
+import { processRecurringTransactions } from '@/lib/recurringEngine';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const processedUserIdRef = useRef<string | null>(null);
+  const [isPreparingRecurring, setIsPreparingRecurring] = useState(false);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!user) {
+      processedUserIdRef.current = null;
+      setIsPreparingRecurring(false);
+      return;
+    }
+
+    if (processedUserIdRef.current === user.id) {
+      return;
+    }
+
+    let isActive = true;
+    setIsPreparingRecurring(true);
+
+    void processRecurringTransactions(user.id)
+      .catch((error) => {
+        console.error('Erro ao processar transações recorrentes:', error);
+      })
+      .finally(() => {
+        if (!isActive) {
+          return;
+        }
+
+        processedUserIdRef.current = user.id;
+        setIsPreparingRecurring(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [user]);
+
+  if (isLoading || isPreparingRecurring) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-[var(--color-text-secondary)]">A carregar…</div>
+        <div className="text-[var(--color-text-secondary)]">
+          {isPreparingRecurring ? 'A preparar transações recorrentes…' : 'A carregar…'}
+        </div>
       </div>
     );
   }
