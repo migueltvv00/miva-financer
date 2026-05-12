@@ -264,6 +264,8 @@ export function EntryScreen() {
       amount_cents: amountCents,
       type,
       category_id: selectedCategoryId,
+      source_id: null,
+      goal_id: null,
       note: note.trim() ? note.trim() : null,
       date,
       is_recurring: isRecurring,

@@ -16,6 +16,8 @@ export interface Transaction {
   amount_cents: number;
   type: 'expense' | 'income';
   category_id: string;
+  source_id: string | null;
+  goal_id: string | null;
   note: string | null;
   date: string;
   is_recurring: boolean;
@@ -31,5 +33,37 @@ export interface Budget {
   category_id: string;
   month: string;
   limit_cents: number;
+  created_at: string;
+}
+
+export interface IncomeSource {
+  id: string;
+  user_id: string;
+  name: string;
+  type: 'salary' | 'freelance' | 'other';
+  is_archived: boolean;
+  created_at: string;
+}
+
+export interface MonthlyPlan {
+  id: string;
+  user_id: string;
+  month: string;
+  expected_income_cents: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface SavingsGoal {
+  id: string;
+  user_id: string;
+  name: string;
+  target_cents: number;
+  current_cents: number;
+  monthly_contribution_cents: number;
+  deadline: string | null;
+  color: string;
+  emoji: string;
+  is_complete: boolean;
   created_at: string;
 }
