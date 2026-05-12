@@ -1,13 +1,500 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { format } from 'date-fns';
+import { pt } from 'date-fns/locale';
+import { NumPad } from '@/components/NumPad';
+import { useCategoryData } from '@/features/categories/useCategoryData';
+import { useAuth } from '@/hooks/useAuth';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { addToQueue, flushQueue } from '@/lib/offlineQueue';
+import { supabase } from '@/lib/supabase';
+import { formatCents } from '@/lib/utils';
+import { useCategoryStore } from '@/store/categoryStore';
+import { useTransactionStore } from '@/store/transactionStore';
+import type { Transaction } from '@/types';
+
+const MAX_AMOUNT_CENTS = 99_999_999;
+const SUCCESS_FADE_DELAY_MS = 700;
+const SUCCESS_HIDE_DELAY_MS = 1_100;
+const TOAST_HIDE_DELAY_MS = 3_500;
+
+const TYPE_LABELS: Record<Transaction['type'], string> = {
+  expense: 'Despesa',
+  income: 'Receita',
+};
+
+function getTodayDateValue() {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeAmountInput(value: string) {
+  if (!value) {
+    return '';
+  }
+
+  if (value.includes('.')) {
+    const [wholePart = '0', decimalPart = ''] = value.split('.');
+    const normalizedWholePart = wholePart.replace(/^0+(?=\d)/, '') || '0';
+    return `${normalizedWholePart}.${decimalPart}`;
+  }
+
+  return value.replace(/^0+(?=\d)/, '');
+}
+
+function parseAmountInputToCents(value: string) {
+  if (!value) {
+    return 0;
+  }
+
+  if (value.includes('.')) {
+    const [wholePart = '0', decimalPart = ''] = value.split('.');
+
+    if (!/^\d+$/.test(wholePart) || !/^\d*$/.test(decimalPart)) {
+      return 0;
+    }
+
+    const cents = Number(wholePart) * 100 + Number((decimalPart + '00').slice(0, 2));
+    return Number.isFinite(cents) ? Math.min(cents, MAX_AMOUNT_CENTS) : 0;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    return 0;
+  }
+
+  const cents = Number(value);
+  return Number.isFinite(cents) ? Math.min(cents, MAX_AMOUNT_CENTS) : 0;
+}
+
+function appendAmountInput(currentValue: string, key: string) {
+  if (key === '.') {
+    if (currentValue.includes('.')) {
+      return currentValue;
+    }
+
+    return currentValue ? `${currentValue}.` : '0.';
+  }
+
+  if (!/^\d$/.test(key)) {
+    return currentValue;
+  }
+
+  if (currentValue.includes('.')) {
+    const [wholePart, decimalPart = ''] = currentValue.split('.');
+    if (decimalPart.length >= 2) {
+      return currentValue;
+    }
+
+    const nextValue = normalizeAmountInput(`${wholePart}.${decimalPart}${key}`);
+    return parseAmountInputToCents(nextValue) > MAX_AMOUNT_CENTS
+      ? currentValue
+      : nextValue;
+  }
+
+  const nextValue = normalizeAmountInput(`${currentValue}${key}`);
+  return parseAmountInputToCents(nextValue) > MAX_AMOUNT_CENTS
+    ? currentValue
+    : nextValue;
+}
+
+function backspaceAmountInput(currentValue: string) {
+  const nextValue = currentValue.slice(0, -1);
+  return normalizeAmountInput(nextValue);
+}
+
+function formatEntryDate(dateValue: string) {
+  return format(new Date(`${dateValue}T12:00:00`), 'd MMM yyyy', { locale: pt });
+}
+
 export function EntryScreen() {
+  const { user } = useAuth();
+  const isOnline = useOnlineStatus();
+  const categories = useCategoryStore((state) => state.categories);
+  const isLoadingCategories = useCategoryStore((state) => state.isLoading);
+  const addTransaction = useTransactionStore((state) => state.addTransaction);
+  const removeTransaction = useTransactionStore((state) => state.removeTransaction);
+
+  const { error: categoryError } = useCategoryData(user?.id);
+
+  const [type, setType] = useState<Transaction['type']>('expense');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [amountInput, setAmountInput] = useState('');
+  const [note, setNote] = useState('');
+  const [date, setDate] = useState(getTodayDateValue());
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [successToken, setSuccessToken] = useState(0);
+  const [isSuccessVisible, setIsSuccessVisible] = useState(false);
+  const [isSuccessFading, setIsSuccessFading] = useState(false);
+
+  const numPadRef = useRef<HTMLDivElement>(null);
+  const dateInputRef = useRef<HTMLInputElement>(null);
+
+  const amountCents = useMemo(
+    () => parseAmountInputToCents(amountInput),
+    [amountInput]
+  );
+
+  const filteredCategories = useMemo(
+    () => categories.filter((category) => category.type === type),
+    [categories, type]
+  );
+
+  useEffect(() => {
+    if (!selectedCategoryId) {
+      return;
+    }
+
+    const categoryExists = filteredCategories.some(
+      (category) => category.id === selectedCategoryId
+    );
+
+    if (!categoryExists) {
+      setSelectedCategoryId(null);
+    }
+  }, [filteredCategories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (!isOnline || !user) {
+      return;
+    }
+
+    let isActive = true;
+
+    const syncQueuedTransactions = async () => {
+      const failedTransactions = await flushQueue();
+
+      if (!isActive || failedTransactions.length === 0) {
+        return;
+      }
+
+      console.error('Algumas transações offline ficaram na fila para nova tentativa.');
+    };
+
+    void syncQueuedTransactions();
+
+    return () => {
+      isActive = false;
+    };
+  }, [isOnline, user]);
+
+  useEffect(() => {
+    if (!toastMessage) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setToastMessage(null);
+    }, TOAST_HIDE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [toastMessage]);
+
+  useEffect(() => {
+    if (successToken === 0) {
+      return;
+    }
+
+    setIsSuccessVisible(true);
+    setIsSuccessFading(false);
+
+    const fadeTimeoutId = window.setTimeout(() => {
+      setIsSuccessFading(true);
+    }, SUCCESS_FADE_DELAY_MS);
+
+    const hideTimeoutId = window.setTimeout(() => {
+      setIsSuccessVisible(false);
+      setIsSuccessFading(false);
+    }, SUCCESS_HIDE_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(fadeTimeoutId);
+      window.clearTimeout(hideTimeoutId);
+    };
+  }, [successToken]);
+
+  const handleAmountDisplayPress = () => {
+    numPadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  };
+
+  const handleDatePickerOpen = () => {
+    const input = dateInputRef.current as (HTMLInputElement & {
+      showPicker?: () => void;
+    }) | null;
+
+    if (!input) {
+      return;
+    }
+
+    if (typeof input.showPicker === 'function') {
+      input.showPicker();
+      return;
+    }
+
+    input.focus();
+    input.click();
+  };
+
+  const handleSubmit = async () => {
+    if (!user || amountCents <= 0 || !selectedCategoryId || isSubmitting) {
+      return;
+    }
+
+    const transaction: Transaction = {
+      id: crypto.randomUUID(),
+      user_id: user.id,
+      amount_cents: amountCents,
+      type,
+      category_id: selectedCategoryId,
+      note: note.trim() ? note.trim() : null,
+      date,
+      is_recurring: false,
+      recurrence_rule: null,
+      recurrence_parent_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    setIsSubmitting(true);
+    setToastMessage(null);
+    addTransaction(transaction);
+
+    try {
+      if (!isOnline) {
+        addToQueue(transaction);
+      } else {
+        const { error } = await supabase.from('transactions').insert(transaction);
+
+        if (error) {
+          throw error;
+        }
+      }
+
+      setAmountInput('');
+      setNote('');
+      setSuccessToken((value) => value + 1);
+    } catch (error) {
+      console.error('Erro ao guardar transação:', error);
+      removeTransaction(transaction.id);
+      setToastMessage('Erro ao guardar transação. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const isSubmitDisabled =
+    !user || amountCents <= 0 || !selectedCategoryId || isSubmitting;
+
   return (
-    <div className="flex flex-col items-center justify-center h-full p-6">
-      <span className="text-5xl mb-4">➕</span>
-      <h2 className="text-xl font-semibold text-[var(--color-text)]">
-        Adicionar Transação
-      </h2>
-      <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-        Registe despesas e receitas rapidamente.
-      </p>
+    <div className="mx-auto flex min-h-full w-full max-w-xl flex-col gap-4 bg-[var(--color-bg-secondary)] p-4 sm:p-6">
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold text-[var(--color-text)]">
+              Registar transação
+            </h1>
+            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+              Adicione despesas e receitas num instante.
+            </p>
+          </div>
+
+          {isSuccessVisible && (
+            <div
+              className={`flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-[var(--color-success)] text-xl text-[var(--color-text-inverse)] shadow-[var(--shadow-sm)] transition-all duration-300 ${
+                isSuccessFading ? 'scale-95 opacity-0' : 'scale-100 opacity-100'
+              }`}
+              aria-live="polite"
+            >
+              ✓
+            </div>
+          )}
+        </div>
+
+        {!isOnline && (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text-secondary)]">
+            Offline — sincroniza quando houver ligação
+          </div>
+        )}
+
+        {categoryError && (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)]/20 bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">
+            {categoryError}
+          </div>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={handleAmountDisplayPress}
+        className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 text-left shadow-[var(--shadow-sm)] transition-colors hover:bg-[var(--color-bg-secondary)]"
+      >
+        <span className="text-sm font-medium text-[var(--color-text-secondary)]">
+          Montante
+        </span>
+        <span className="mt-2 block text-4xl font-semibold tabular-nums text-[var(--color-text)] sm:text-5xl">
+          {formatCents(amountCents)}
+        </span>
+      </button>
+
+      <div className="grid grid-cols-2 gap-2">
+        {(['expense', 'income'] as const).map((option) => {
+          const isActive = type === option;
+
+          return (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setType(option)}
+              aria-pressed={isActive}
+              className={`min-h-[44px] rounded-[var(--radius-md)] border px-4 py-3 text-sm font-semibold transition-colors ${
+                isActive
+                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]'
+                  : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+              }`}
+            >
+              {TYPE_LABELS[option]}
+            </button>
+          );
+        })}
+      </div>
+
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-[var(--color-text)]">Categoria</h2>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Escolha uma categoria de {TYPE_LABELS[type].toLowerCase()}.
+            </p>
+          </div>
+          {filteredCategories.length > 0 && (
+            <span className="text-xs text-[var(--color-text-tertiary)]">
+              Deslize para ver mais
+            </span>
+          )}
+        </div>
+
+        {isLoadingCategories ? (
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            A carregar categorias…
+          </p>
+        ) : filteredCategories.length === 0 ? (
+          <p className="text-sm text-[var(--color-text-secondary)]">
+            Não existem categorias disponíveis para {TYPE_LABELS[type].toLowerCase()}.
+          </p>
+        ) : (
+          <div className="overflow-x-auto pb-1">
+            <div className="grid auto-cols-[84px] grid-flow-col grid-rows-2 gap-3">
+              {filteredCategories.map((category) => {
+                const isActive = category.id === selectedCategoryId;
+
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setSelectedCategoryId(category.id)}
+                    aria-pressed={isActive}
+                    className={`flex min-h-[76px] w-[84px] flex-col items-center justify-center gap-1 rounded-[var(--radius-md)] border px-2 py-3 text-center transition-colors ${
+                      isActive
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-bg-secondary)]'
+                    }`}
+                  >
+                    <span className="text-2xl" aria-hidden="true">
+                      {category.emoji}
+                    </span>
+                    <span
+                      className={`w-full truncate text-xs font-medium ${
+                        isActive
+                          ? 'text-[var(--color-accent)]'
+                          : 'text-[var(--color-text-secondary)]'
+                      }`}
+                    >
+                      {category.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+        <label
+          htmlFor="transaction-note"
+          className="mb-2 block text-sm font-medium text-[var(--color-text)]"
+        >
+          Nota (opcional)
+        </label>
+        <input
+          id="transaction-note"
+          type="text"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+          placeholder="Adicionar nota"
+          maxLength={120}
+          className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
+        />
+      </div>
+
+      <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+        <span className="mb-2 block text-sm font-medium text-[var(--color-text)]">
+          Data
+        </span>
+        <div className="relative">
+          <button
+            type="button"
+            onClick={handleDatePickerOpen}
+            className="flex min-h-[44px] w-full items-center justify-between rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-left text-sm text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)]"
+          >
+            <span>{formatEntryDate(date)}</span>
+            <span className="text-lg text-[var(--color-text-secondary)]">📅</span>
+          </button>
+          <input
+            ref={dateInputRef}
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+            className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+            aria-label="Selecionar data"
+          />
+        </div>
+      </div>
+
+      <div className="mt-auto space-y-4 pb-4" ref={numPadRef}>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+          <NumPad
+            onKeyPress={(key) => {
+              setAmountInput((currentValue) => appendAmountInput(currentValue, key));
+            }}
+            onBackspace={() => {
+              setAmountInput((currentValue) => backspaceAmountInput(currentValue));
+            }}
+            disableDecimal={amountInput.includes('.')}
+            disabled={isSubmitting}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={isSubmitDisabled}
+          className="flex min-h-[48px] w-full items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-3 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isSubmitting ? 'A guardar…' : 'Guardar'}
+        </button>
+      </div>
+
+      {toastMessage && (
+        <div className="fixed bottom-24 left-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 rounded-[var(--radius-md)] bg-[var(--color-danger)] px-4 py-3 text-sm font-medium text-[var(--color-text-inverse)] shadow-[var(--shadow-md)] md:bottom-6">
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }
