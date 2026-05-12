@@ -69,10 +69,10 @@ src/
 ### v1.0
 
 - [x] **Phase 1 — Project scaffold** (FIN-3): Vite + React + TS + Tailwind + Supabase client + Zustand skeleton + PWA + navigation shell
-- [ ] Phase 2 — Auth (FIN-6)
-- [x] **Phase 3 — Categories management** (FIN-9): gestão de categorias nas definições com listagem por tipo, criação/edição em modal, reordenação e eliminação protegida para categorias predefinidas
-- [ ] Phase 4 — Quick transaction entry (FIN-7)
-- [ ] Phase 5 — Transaction list (FIN-4)
-- [ ] Phase 6 — Budget limits (FIN-5)
-- [ ] Phase 7 — Monthly summary dashboard (FIN-8)
-- [ ] Phase 8 — Recurring transactions (FIN-10)
+- [x] **Phase 2 — Auth** (FIN-6): Login/signup, useAuth, protected routes, category seed on first login
+- [x] **Phase 3 — Categories management** (FIN-9): CRUD, reorder, emoji/color picker, defaults protected
+- [x] **Phase 4 — Quick transaction entry** (FIN-7): Custom NumPad, category grid, optimistic submit, offline queue
+- [x] **Phase 5 — Transaction list** (FIN-4): Grouped by date, month/category filters, swipe delete, edit modal
+- [x] **Phase 6 — Budget limits** (FIN-5): Per-category monthly limits, copy from last month
+- [x] **Phase 7 — Monthly summary dashboard** (FIN-8): Recharts donut, progress bars, realtime sync
+- [x] **Phase 8 — Recurring transactions** (FIN-10): Toggle, frequency, auto-creation, delete one/all future
