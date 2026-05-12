@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
 import { AppLayout } from '@/components/AppLayout';
@@ -12,46 +12,30 @@ import { processRecurringTransactions } from '@/lib/recurringEngine';
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const processedUserIdRef = useRef<string | null>(null);
-  const [isPreparingRecurring, setIsPreparingRecurring] = useState(false);
+
+  const userId = user?.id ?? null;
 
   useEffect(() => {
-    if (!user) {
+    if (!userId) {
       processedUserIdRef.current = null;
-      setIsPreparingRecurring(false);
       return;
     }
 
-    if (processedUserIdRef.current === user.id) {
+    if (processedUserIdRef.current === userId) {
       return;
     }
 
-    let isActive = true;
-    setIsPreparingRecurring(true);
+    processedUserIdRef.current = userId;
 
-    void processRecurringTransactions(user.id)
-      .catch((error) => {
-        console.error('Erro ao processar transações recorrentes:', error);
-      })
-      .finally(() => {
-        if (!isActive) {
-          return;
-        }
+    void processRecurringTransactions(userId).catch((error) => {
+      console.error('Erro ao processar transações recorrentes:', error);
+    });
+  }, [userId]);
 
-        processedUserIdRef.current = user.id;
-        setIsPreparingRecurring(false);
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [user]);
-
-  if (isLoading || isPreparingRecurring) {
+  if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center">
-        <div className="text-[var(--color-text-secondary)]">
-          {isPreparingRecurring ? 'A preparar transações recorrentes…' : 'A carregar…'}
-        </div>
+        <div className="text-[var(--color-text-secondary)]">A carregar…</div>
       </div>
     );
   }

@@ -34,7 +34,8 @@ export function useAuth() {
         isLoading: false,
       });
 
-      if (event === 'SIGNED_IN' && session?.user) {
+      // Only seed on explicit sign-in, not on INITIAL_SESSION or TOKEN_REFRESHED
+      if ((event === 'SIGNED_IN') && session?.user) {
         await seedDefaultCategories(session.user.id);
       }
     });

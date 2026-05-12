@@ -26,7 +26,20 @@ const DEFAULT_CATEGORIES: DefaultCategory[] = [
   { name: 'Outros Rendimentos', emoji: '📥', color: '#9065B0', type: 'income', sort_order: 2 },
 ];
 
+// Prevent concurrent seed calls from racing
+let seedInFlight: Promise<void> | null = null;
+
 export async function seedDefaultCategories(userId: string): Promise<void> {
+  if (seedInFlight) return seedInFlight;
+
+  seedInFlight = doSeed(userId).finally(() => {
+    seedInFlight = null;
+  });
+
+  return seedInFlight;
+}
+
+async function doSeed(userId: string): Promise<void> {
   try {
     const { count } = await supabase
       .from('categories')
