@@ -70,7 +70,7 @@ src/
 
 - [x] **Phase 1 — Project scaffold** (FIN-3): Vite + React + TS + Tailwind + Supabase client + Zustand skeleton + PWA + navigation shell
 - [ ] Phase 2 — Auth (FIN-6)
-- [ ] Phase 3 — Categories management (FIN-9)
+- [x] **Phase 3 — Categories management** (FIN-9): gestão de categorias nas definições com listagem por tipo, criação/edição em modal, reordenação e eliminação protegida para categorias predefinidas
 - [ ] Phase 4 — Quick transaction entry (FIN-7)
 - [ ] Phase 5 — Transaction list (FIN-4)
 - [ ] Phase 6 — Budget limits (FIN-5)

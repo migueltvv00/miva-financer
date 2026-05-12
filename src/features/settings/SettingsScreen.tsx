@@ -1,3 +1,4 @@
+import { CategoryList } from '@/features/categories/CategoryList';
 import { useAuth } from '@/hooks/useAuth';
 
 export function SettingsScreen() {
@@ -12,8 +13,8 @@ export function SettingsScreen() {
   };
 
   return (
-    <div className="flex flex-col h-full p-6">
-      <h2 className="text-xl font-semibold text-[var(--color-text)] mb-6">
+    <div className="flex h-full flex-col p-6">
+      <h2 className="mb-6 text-xl font-semibold text-[var(--color-text)]">
         Definições
       </h2>
 
@@ -26,6 +27,8 @@ export function SettingsScreen() {
             {user?.email}
           </p>
         </div>
+
+        <CategoryList userId={user?.id} />
 
         <button
           onClick={handleSignOut}
