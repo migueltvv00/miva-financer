@@ -7,6 +7,7 @@ import { EntryScreen } from '@/features/transactions/EntryScreen';
 import { TransactionListScreen } from '@/features/transactions/TransactionListScreen';
 import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
 import { GoalsScreen } from '@/features/goals/GoalsScreen';
+import { NetWorthScreen } from '@/features/net-worth/NetWorthScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { TrendsScreen } from '@/features/trends/TrendsScreen';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
@@ -91,6 +92,7 @@ export function App() {
           <Route path="resumo" element={<DashboardScreen />} />
           <Route path="tendencias" element={<TrendsScreen />} />
           <Route path="objetivos" element={<GoalsScreen />} />
+          <Route path="patrimonio" element={<NetWorthScreen />} />
           <Route path="definicoes" element={<SettingsScreen />} />
         </Route>
       </Routes>

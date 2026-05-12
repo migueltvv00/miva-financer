@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { endOfYear, format, startOfYear } from 'date-fns';
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { endOfMonth, format, startOfYear } from 'date-fns';
 import {
   Area,
   AreaChart,
@@ -11,10 +11,12 @@ import {
 } from 'recharts';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
-import { computeCategoryTrends } from '@/features/trends/trendUtils';
-import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
+import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
 import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
+import type { MonthlyReportProps } from '@/features/reports/MonthlyReport';
+import { computeCategoryTrends } from '@/features/trends/trendUtils';
+import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
 import { useAuth } from '@/hooks/useAuth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
@@ -71,6 +73,11 @@ interface IncomeSourceBreakdownItem {
 }
 
 const NO_SOURCE_KEY = '__no_source__';
+
+const DashboardPdfExport = lazy(async () => {
+  const module = await import('@/features/dashboard/DashboardPdfExport');
+  return { default: module.DashboardPdfExport };
+});
 
 const percentageFormatter = new Intl.NumberFormat('pt-PT', {
   style: 'percent',
@@ -172,6 +179,11 @@ export function DashboardScreen() {
     error: incomeSourceError,
     isLoading: isLoadingSources,
   } = useIncomeSourceData(user?.id, { includeArchived: true });
+  const {
+    goals,
+    error: savingsGoalError,
+    isLoading: isLoadingGoals,
+  } = useSavingsGoalData(user?.id);
   const { error: transactionError } = useTransactionData(user?.id, selectedMonth);
   const { error: trendError } = useTrendTransactionData(user?.id, selectedMonth);
 
@@ -205,6 +217,11 @@ export function DashboardScreen() {
   const budgetMap = useMemo(
     () => new Map(budgets.map((budget) => [budget.category_id, budget])),
     [budgets]
+  );
+  const reportMonth = useMemo(() => format(selectedMonth, 'yyyy-MM'), [selectedMonth]);
+  const activeSavingsGoals = useMemo(
+    () => goals.filter((goal) => !goal.is_complete),
+    [goals]
   );
 
   const {
@@ -377,8 +394,8 @@ export function DashboardScreen() {
       setFreelanceYtdError(null);
 
       try {
-        const yearStart = format(startOfYear(new Date()), 'yyyy-MM-dd');
-        const yearEnd = format(endOfYear(new Date()), 'yyyy-MM-dd');
+        const yearStart = format(startOfYear(selectedMonth), 'yyyy-MM-dd');
+        const yearToDateEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
         const freelanceSourceIdSet = new Set(freelanceSourceIds);
 
         const { data, error } = await supabase
@@ -387,7 +404,7 @@ export function DashboardScreen() {
           .eq('user_id', user.id)
           .eq('type', 'income')
           .gte('date', yearStart)
-          .lte('date', yearEnd);
+          .lte('date', yearToDateEnd);
 
         if (error) {
           throw error;
@@ -431,7 +448,7 @@ export function DashboardScreen() {
     return () => {
       isActive = false;
     };
-  }, [freelanceSourceIds, user?.id]);
+  }, [freelanceSourceIds, selectedMonth, user?.id]);
 
   const hasFreelanceSources = freelanceSourceIds.length > 0;
   const errorMessages = [
@@ -440,6 +457,7 @@ export function DashboardScreen() {
     trendError,
     budgetError,
     incomeSourceError,
+    savingsGoalError,
   ].filter((message): message is string => Boolean(message));
 
   const isLoading =
@@ -447,8 +465,98 @@ export function DashboardScreen() {
     isLoadingCategories ||
     isLoadingTransactions ||
     isLoadingTrendTransactions ||
-    isLoadingSources;
+    isLoadingSources ||
+    isLoadingGoals;
   const netCents = totalIncome - totalExpenses;
+  const monthlyReportProps = useMemo(
+    () => {
+      const expenseByCategoryMap = new Map<
+        string,
+        { name: string; budgetedCents: number | null; actualCents: number }
+      >();
+
+      budgets.forEach((budget) => {
+        const category = categoryMap.get(budget.category_id);
+
+        if (!category || category.type !== 'expense') {
+          return;
+        }
+
+        expenseByCategoryMap.set(budget.category_id, {
+          name: category.name,
+          budgetedCents: budget.limit_cents,
+          actualCents: expenseByCategoryMap.get(budget.category_id)?.actualCents ?? 0,
+        });
+      });
+
+      transactions.forEach((transaction) => {
+        if (transaction.type !== 'expense') {
+          return;
+        }
+
+        const category = categoryMap.get(transaction.category_id);
+
+        if (!category || category.type !== 'expense') {
+          return;
+        }
+
+        const existingItem = expenseByCategoryMap.get(transaction.category_id);
+
+        expenseByCategoryMap.set(transaction.category_id, {
+          name: category.name,
+          budgetedCents:
+            existingItem?.budgetedCents ?? budgetMap.get(transaction.category_id)?.limit_cents ?? null,
+          actualCents: (existingItem?.actualCents ?? 0) + transaction.amount_cents,
+        });
+      });
+
+      return {
+        month: reportMonth,
+        userEmail: user?.email ?? 'Sem email disponível',
+        generatedAt: new Date(),
+        totalIncomeCents: totalIncome,
+        totalExpenseCents: totalExpenses,
+        incomeBySource: incomeSourceItems.map((item) => ({
+          name: item.name,
+          amountCents: item.amountCents,
+        })),
+        expenseByCategory: Array.from(expenseByCategoryMap.values()).sort((left, right) => {
+          if (right.actualCents !== left.actualCents) {
+            return right.actualCents - left.actualCents;
+          }
+
+          const leftBudgetedCents = left.budgetedCents ?? -1;
+          const rightBudgetedCents = right.budgetedCents ?? -1;
+
+          if (rightBudgetedCents !== leftBudgetedCents) {
+            return rightBudgetedCents - leftBudgetedCents;
+          }
+
+          return left.name.localeCompare(right.name, 'pt-PT');
+        }),
+        freelanceYtdCents: freelanceYtdAmount,
+        savingsGoals: activeSavingsGoals.map((goal) => ({
+          name: goal.name,
+          currentCents: goal.current_cents,
+          targetCents: goal.target_cents,
+        })),
+      } satisfies MonthlyReportProps;
+    },
+    [
+      activeSavingsGoals,
+      budgetMap,
+      budgets,
+      categoryMap,
+      freelanceYtdAmount,
+      incomeSourceItems,
+      reportMonth,
+      totalExpenses,
+      totalIncome,
+      transactions,
+      user?.email,
+    ]
+  );
+  const pdfFileName = useMemo(() => `fluxo-${reportMonth}.pdf`, [reportMonth]);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-4 bg-[var(--color-bg-secondary)] p-4 sm:p-6">
@@ -530,6 +638,16 @@ export function DashboardScreen() {
               toneClassName={getValueToneClass(netCents)}
             />
           </div>
+
+          <Suspense
+            fallback={
+              <div className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg)] px-4 py-2 text-sm font-medium text-[var(--color-accent)]">
+                A preparar exportação…
+              </div>
+            }
+          >
+            <DashboardPdfExport report={monthlyReportProps} fileName={pdfFileName} />
+          </Suspense>
 
           <SectionCard
             title="Progresso por categoria"
