@@ -1,0 +1,171 @@
+import { useEffect } from 'react';
+import { format, startOfMonth } from 'date-fns';
+import { supabase } from '@/lib/supabase';
+import { useBudgetStore } from '@/store/budgetStore';
+import { useTransactionStore } from '@/store/transactionStore';
+import type { Budget, Transaction } from '@/types';
+
+function getMonthKey(date: Date) {
+  return format(startOfMonth(date), 'yyyy-MM-dd');
+}
+
+function getMonthPrefix(date: Date) {
+  return format(startOfMonth(date), 'yyyy-MM');
+}
+
+function isTransactionInMonth(transaction: Partial<Transaction>, monthPrefix: string) {
+  return typeof transaction.date === 'string' && transaction.date.startsWith(monthPrefix);
+}
+
+function isBudgetInMonth(budget: Partial<Budget>, monthKey: string) {
+  return budget.month === monthKey;
+}
+
+function handleTransactionChange(
+  payload: { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Record<string, unknown>; old: Record<string, unknown> },
+  monthPrefix: string
+) {
+  const { addTransaction, removeTransaction, updateTransaction, transactions } =
+    useTransactionStore.getState();
+
+  const nextTransaction = payload.new as Partial<Transaction>;
+  const previousTransaction = payload.old as Partial<Transaction>;
+  const recordId =
+    typeof nextTransaction.id === 'string'
+      ? nextTransaction.id
+      : typeof previousTransaction.id === 'string'
+        ? previousTransaction.id
+        : null;
+
+  if (!recordId) {
+    return;
+  }
+
+  const existingTransaction = transactions.find(
+    (transaction) => transaction.id === recordId
+  );
+
+  if (payload.eventType === 'DELETE') {
+    removeTransaction(recordId);
+    return;
+  }
+
+  if (!isTransactionInMonth(nextTransaction, monthPrefix)) {
+    if (existingTransaction) {
+      removeTransaction(recordId);
+    }
+    return;
+  }
+
+  const transaction = nextTransaction as Transaction;
+
+  if (existingTransaction) {
+    updateTransaction(recordId, transaction);
+    return;
+  }
+
+  addTransaction(transaction);
+}
+
+function handleBudgetChange(
+  payload: { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Record<string, unknown>; old: Record<string, unknown> },
+  monthKey: string
+) {
+  const { addBudget, removeBudget, updateBudget, budgets } = useBudgetStore.getState();
+
+  const nextBudget = payload.new as Partial<Budget>;
+  const previousBudget = payload.old as Partial<Budget>;
+  const recordId =
+    typeof nextBudget.id === 'string'
+      ? nextBudget.id
+      : typeof previousBudget.id === 'string'
+        ? previousBudget.id
+        : null;
+
+  if (!recordId) {
+    return;
+  }
+
+  const existingBudget = budgets.find((budget) => budget.id === recordId);
+
+  if (payload.eventType === 'DELETE') {
+    removeBudget(recordId);
+    return;
+  }
+
+  if (!isBudgetInMonth(nextBudget, monthKey)) {
+    if (existingBudget) {
+      removeBudget(recordId);
+    }
+    return;
+  }
+
+  const budget = nextBudget as Budget;
+
+  if (existingBudget) {
+    updateBudget(recordId, budget);
+    return;
+  }
+
+  addBudget(budget);
+}
+
+export function useRealtimeSync(
+  userId: string | null | undefined,
+  selectedMonth: Date
+) {
+  useEffect(() => {
+    if (!userId) {
+      return;
+    }
+
+    const monthKey = getMonthKey(selectedMonth);
+    const monthPrefix = getMonthPrefix(selectedMonth);
+
+    const channel = supabase
+      .channel(`dashboard-sync:${userId}:${monthKey}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'transactions',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          handleTransactionChange(
+            payload as {
+              eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+              new: Record<string, unknown>;
+              old: Record<string, unknown>;
+            },
+            monthPrefix
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'budgets',
+          filter: `user_id=eq.${userId}`,
+        },
+        (payload) => {
+          handleBudgetChange(
+            payload as {
+              eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+              new: Record<string, unknown>;
+              old: Record<string, unknown>;
+            },
+            monthKey
+          );
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedMonth, userId]);
+}
