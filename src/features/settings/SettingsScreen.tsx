@@ -2,6 +2,7 @@ import { BudgetScreen } from '@/features/budgets/BudgetScreen';
 import { CategoryList } from '@/features/categories/CategoryList';
 import { useCategoryData } from '@/features/categories/useCategoryData';
 import { IncomeSourceList } from '@/features/income-sources/IncomeSourceList';
+import { PlanningScreen } from '@/features/planning/PlanningScreen';
 import { useAuth } from '@/hooks/useAuth';
 
 export function SettingsScreen() {
@@ -34,6 +35,7 @@ export function SettingsScreen() {
 
         <CategoryList userId={user?.id} loadError={categoryError} />
         <IncomeSourceList userId={user?.id} />
+        <PlanningScreen userId={user?.id} />
         <BudgetScreen userId={user?.id} categoryError={categoryError} />
 
         <button
