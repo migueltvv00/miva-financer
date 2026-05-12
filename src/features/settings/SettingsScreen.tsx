@@ -1,8 +1,11 @@
+import { BudgetScreen } from '@/features/budgets/BudgetScreen';
 import { CategoryList } from '@/features/categories/CategoryList';
+import { useCategoryData } from '@/features/categories/useCategoryData';
 import { useAuth } from '@/hooks/useAuth';
 
 export function SettingsScreen() {
   const { user, signOut } = useAuth();
+  const { error: categoryError } = useCategoryData(user?.id);
 
   const handleSignOut = async () => {
     try {
@@ -28,7 +31,8 @@ export function SettingsScreen() {
           </p>
         </div>
 
-        <CategoryList userId={user?.id} />
+        <CategoryList userId={user?.id} loadError={categoryError} />
+        <BudgetScreen userId={user?.id} categoryError={categoryError} />
 
         <button
           onClick={handleSignOut}

@@ -6,10 +6,10 @@ import {
   CategoryModal,
   type CategoryFormValues,
 } from '@/features/categories/CategoryModal';
-import { useCategoryData } from '@/features/categories/useCategoryData';
 
 interface CategoryListProps {
   userId: string | null | undefined;
+  loadError?: string | null;
 }
 
 type CategoryModalState =
@@ -36,7 +36,10 @@ const SECTION_COPY: Record<
   },
 };
 
-export function CategoryList({ userId }: CategoryListProps) {
+export function CategoryList({
+  userId,
+  loadError = null,
+}: CategoryListProps) {
   const categories = useCategoryStore((state) => state.categories);
   const isLoading = useCategoryStore((state) => state.isLoading);
   const setCategories = useCategoryStore((state) => state.setCategories);
@@ -44,8 +47,6 @@ export function CategoryList({ userId }: CategoryListProps) {
   const updateCategory = useCategoryStore((state) => state.updateCategory);
   const removeCategory = useCategoryStore((state) => state.removeCategory);
   const swapCategoryOrder = useCategoryStore((state) => state.swapCategoryOrder);
-
-  const { error: loadError } = useCategoryData(userId);
 
   const [modalState, setModalState] = useState<CategoryModalState | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
