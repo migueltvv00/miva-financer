@@ -8,6 +8,7 @@ import { TransactionListScreen } from '@/features/transactions/TransactionListSc
 import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
 import { GoalsScreen } from '@/features/goals/GoalsScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
+import { TrendsScreen } from '@/features/trends/TrendsScreen';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -88,6 +89,7 @@ export function App() {
           <Route index element={<EntryScreen />} />
           <Route path="transacoes" element={<TransactionListScreen />} />
           <Route path="resumo" element={<DashboardScreen />} />
+          <Route path="tendencias" element={<TrendsScreen />} />
           <Route path="objetivos" element={<GoalsScreen />} />
           <Route path="definicoes" element={<SettingsScreen />} />
         </Route>

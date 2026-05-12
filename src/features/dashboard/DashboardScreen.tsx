@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { endOfYear, format, startOfYear } from 'date-fns';
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
+import {
+  Area,
+  AreaChart,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+} from 'recharts';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { computeCategoryTrends } from '@/features/trends/trendUtils';
+import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
 import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
@@ -99,6 +109,18 @@ function getProgressColor(percentageUsed: number | null) {
   return 'var(--color-success)';
 }
 
+function getInsightTextClass(insight: 'above' | 'below' | 'normal') {
+  if (insight === 'above') {
+    return 'text-[var(--color-danger)]';
+  }
+
+  if (insight === 'below') {
+    return 'text-[var(--color-success)]';
+  }
+
+  return 'text-[var(--color-text-tertiary)]';
+}
+
 function SummaryCard({ title, amount, toneClassName }: SummaryCardProps) {
   return (
     <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
@@ -129,7 +151,11 @@ export function DashboardScreen() {
   const categories = useCategoryStore((state) => state.categories);
   const isLoadingCategories = useCategoryStore((state) => state.isLoading);
   const transactions = useTransactionStore((state) => state.transactions);
+  const trendTransactions = useTransactionStore((state) => state.trendTransactions);
   const isLoadingTransactions = useTransactionStore((state) => state.isLoading);
+  const isLoadingTrendTransactions = useTransactionStore(
+    (state) => state.isLoadingTrendTransactions
+  );
   const isLoadingBudgets = useBudgetStore((state) => state.isLoading);
 
   const { error: categoryError } = useCategoryData(user?.id);
@@ -147,6 +173,7 @@ export function DashboardScreen() {
     isLoading: isLoadingSources,
   } = useIncomeSourceData(user?.id, { includeArchived: true });
   const { error: transactionError } = useTransactionData(user?.id, selectedMonth);
+  const { error: trendError } = useTrendTransactionData(user?.id, selectedMonth);
 
   useRealtimeSync(user?.id, selectedMonth);
 
@@ -157,6 +184,15 @@ export function DashboardScreen() {
   const sourceMap = useMemo(
     () => new Map(sources.map((source) => [source.id, source])),
     [sources]
+  );
+  const categoryTrendMap = useMemo(
+    () =>
+      new Map(
+        computeCategoryTrends(trendTransactions, categories, selectedMonth).map(
+          (trend) => [trend.categoryId, trend]
+        )
+      ),
+    [categories, selectedMonth, trendTransactions]
   );
   const freelanceSourceIds = useMemo(
     () =>
@@ -401,6 +437,7 @@ export function DashboardScreen() {
   const errorMessages = [
     categoryError,
     transactionError,
+    trendError,
     budgetError,
     incomeSourceError,
   ].filter((message): message is string => Boolean(message));
@@ -409,6 +446,7 @@ export function DashboardScreen() {
     isLoadingBudgets ||
     isLoadingCategories ||
     isLoadingTransactions ||
+    isLoadingTrendTransactions ||
     isLoadingSources;
   const netCents = totalIncome - totalExpenses;
 
@@ -515,6 +553,7 @@ export function DashboardScreen() {
                   const amountLabel = hasLimit
                     ? `${formatCents(item.spentCents)} / ${formatCents(limitCents)}`
                     : formatCents(item.spentCents);
+                  const trend = categoryTrendMap.get(item.category.id);
 
                   return (
                     <div key={item.category.id} className="space-y-2">
@@ -553,6 +592,33 @@ export function DashboardScreen() {
                               backgroundColor: progressColor,
                             }}
                           />
+                        </div>
+                      )}
+
+                      {trend && (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="h-6 w-20 shrink-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <AreaChart data={trend.monthlyData}>
+                                <Area
+                                  type="monotone"
+                                  dataKey="amount"
+                                  stroke={item.category.color}
+                                  fill={item.category.color}
+                                  fillOpacity={0.2}
+                                  strokeWidth={1.5}
+                                />
+                              </AreaChart>
+                            </ResponsiveContainer>
+                          </div>
+
+                          <span
+                            className={`text-right text-xs ${getInsightTextClass(
+                              trend.insight
+                            )}`}
+                          >
+                            {trend.insightText}
+                          </span>
                         </div>
                       )}
                     </div>

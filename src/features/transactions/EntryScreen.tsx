@@ -6,6 +6,7 @@ import { useCategoryData } from '@/features/categories/useCategoryData';
 import { IncomeSourceSelector } from '@/features/income-sources/IncomeSourceSelector';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { useAuth } from '@/hooks/useAuth';
+import { useCategorySuggestion } from '@/hooks/useCategorySuggestion';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { addToQueue, flushQueue } from '@/lib/offlineQueue';
 import { supabase } from '@/lib/supabase';
@@ -125,6 +126,7 @@ export function EntryScreen() {
   const isOnline = useOnlineStatus();
   const categories = useCategoryStore((state) => state.categories);
   const isLoadingCategories = useCategoryStore((state) => state.isLoading);
+  const transactions = useTransactionStore((state) => state.transactions);
   const addTransaction = useTransactionStore((state) => state.addTransaction);
   const removeTransaction = useTransactionStore((state) => state.removeTransaction);
 
@@ -135,6 +137,7 @@ export function EntryScreen() {
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
+  const [manualCategoryOverride, setManualCategoryOverride] = useState(false);
   const [date, setDate] = useState(getTodayDateValue());
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurrenceRule, setRecurrenceRule] = useState<
@@ -162,6 +165,11 @@ export function EntryScreen() {
     () => categories.filter((category) => category.type === type),
     [categories, type]
   );
+  const suggestion = useCategorySuggestion(note, type, transactions);
+
+  useEffect(() => {
+    setManualCategoryOverride(false);
+  }, [note]);
 
   useEffect(() => {
     if (!selectedCategoryId) {
@@ -182,6 +190,18 @@ export function EntryScreen() {
       setSelectedSourceId(null);
     }
   }, [type]);
+
+  useEffect(() => {
+    if (
+      !suggestion ||
+      manualCategoryOverride ||
+      !filteredCategories.some((category) => category.id === suggestion.categoryId)
+    ) {
+      return;
+    }
+
+    setSelectedCategoryId(suggestion.categoryId);
+  }, [filteredCategories, manualCategoryOverride, suggestion]);
 
   useEffect(() => {
     if (!isOnline || !user) {
@@ -430,14 +450,22 @@ export function EntryScreen() {
                   <button
                     key={category.id}
                     type="button"
-                    onClick={() => setSelectedCategoryId(category.id)}
+                    onClick={() => {
+                      setManualCategoryOverride(true);
+                      setSelectedCategoryId(category.id);
+                    }}
                     aria-pressed={isActive}
-                    className={`flex min-h-[76px] w-[84px] flex-col items-center justify-center gap-1 rounded-[var(--radius-md)] border px-2 py-3 text-center transition-colors ${
+                    className={`relative flex min-h-[76px] w-[84px] flex-col items-center justify-center gap-1 rounded-[var(--radius-md)] border px-2 py-3 text-center transition-colors ${
                       isActive
                         ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)]'
                         : 'border-[var(--color-border)] bg-[var(--color-bg)] hover:bg-[var(--color-bg-secondary)]'
                     }`}
                   >
+                    {suggestion?.categoryId === category.id && (
+                      <span className="absolute -top-1 -right-1 rounded-full bg-[var(--color-accent)] px-1.5 py-0.5 text-[9px] font-medium text-[var(--color-text-inverse)]">
+                        Sugerido
+                      </span>
+                    )}
                     <span className="text-2xl" aria-hidden="true">
                       {category.emoji}
                     </span>
