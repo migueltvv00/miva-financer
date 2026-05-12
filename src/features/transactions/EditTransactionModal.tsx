@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale/pt';
 import { NumPad } from '@/components/NumPad';
+import { IncomeSourceSelector } from '@/features/income-sources/IncomeSourceSelector';
+import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
 import type { Transaction } from '@/types';
@@ -25,6 +27,7 @@ export interface EditTransactionFormValues {
   amount_cents: number;
   type: Transaction['type'];
   category_id: string;
+  source_id: string | null;
   note: string | null;
   date: string;
   is_recurring: boolean;
@@ -135,6 +138,7 @@ export function EditTransactionModal({
   const categories = useCategoryStore((state) => state.categories);
   const [type, setType] = useState<Transaction['type']>('expense');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState('');
@@ -156,6 +160,10 @@ export function EditTransactionModal({
     () => categories.filter((category) => category.type === type),
     [categories, type]
   );
+  const { error: incomeSourceError } = useIncomeSourceData(transaction?.user_id, {
+    enabled: isOpen && type === 'income',
+    includeArchived: true,
+  });
 
   useEffect(() => {
     if (!isOpen || !transaction) {
@@ -165,6 +173,7 @@ export function EditTransactionModal({
     setValidationError(null);
     setType(transaction.type);
     setSelectedCategoryId(transaction.category_id);
+    setSelectedSourceId(transaction.source_id);
     setAmountInput(formatAmountInputFromCents(transaction.amount_cents));
     setNote(transaction.note ?? '');
     setDate(transaction.date);
@@ -186,11 +195,17 @@ export function EditTransactionModal({
     }
   }, [filteredCategories, selectedCategoryId]);
 
+  useEffect(() => {
+    if (type !== 'income') {
+      setSelectedSourceId(null);
+    }
+  }, [type]);
+
   if (!isOpen || !transaction) {
     return null;
   }
 
-  const visibleError = validationError ?? errorMessage;
+  const visibleError = validationError ?? errorMessage ?? incomeSourceError;
 
   const handleAmountDisplayPress = () => {
     numPadRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -230,6 +245,7 @@ export function EditTransactionModal({
       amount_cents: amountCents,
       type,
       category_id: selectedCategoryId,
+      source_id: type === 'income' ? selectedSourceId : null,
       note: note.trim() ? note.trim() : null,
       date,
       is_recurring: isRecurring,
@@ -376,6 +392,17 @@ export function EditTransactionModal({
             )}
           </section>
 
+          {type === 'income' && (
+            <IncomeSourceSelector
+              selectedSourceId={selectedSourceId}
+              onSelect={(sourceId) => {
+                setSelectedSourceId(sourceId);
+                setValidationError(null);
+              }}
+              disabled={isSubmitting}
+            />
+          )}
+
           <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
             <label
               htmlFor="edit-transaction-note"
@@ -487,7 +514,7 @@ export function EditTransactionModal({
           </div>
 
           {visibleError && (
-            <p className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-red-50 px-3 py-2 text-sm text-[var(--color-danger)]">
+            <p className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">
               {visibleError}
             </p>
           )}

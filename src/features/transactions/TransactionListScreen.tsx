@@ -457,6 +457,7 @@ export function TransactionListScreen() {
           amount_cents: values.amount_cents,
           type: values.type,
           category_id: values.category_id,
+          source_id: values.source_id,
           note: values.note,
           date: values.date,
           is_recurring: values.is_recurring,

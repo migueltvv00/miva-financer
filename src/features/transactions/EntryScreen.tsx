@@ -3,6 +3,8 @@ import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { NumPad } from '@/components/NumPad';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { IncomeSourceSelector } from '@/features/income-sources/IncomeSourceSelector';
+import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { useAuth } from '@/hooks/useAuth';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { addToQueue, flushQueue } from '@/lib/offlineQueue';
@@ -130,6 +132,7 @@ export function EntryScreen() {
 
   const [type, setType] = useState<Transaction['type']>('expense');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState(getTodayDateValue());
@@ -142,6 +145,10 @@ export function EntryScreen() {
   const [successToken, setSuccessToken] = useState(0);
   const [isSuccessVisible, setIsSuccessVisible] = useState(false);
   const [isSuccessFading, setIsSuccessFading] = useState(false);
+
+  const { error: incomeSourceError } = useIncomeSourceData(user?.id, {
+    enabled: type === 'income',
+  });
 
   const numPadRef = useRef<HTMLDivElement>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -169,6 +176,12 @@ export function EntryScreen() {
       setSelectedCategoryId(null);
     }
   }, [filteredCategories, selectedCategoryId]);
+
+  useEffect(() => {
+    if (type !== 'income') {
+      setSelectedSourceId(null);
+    }
+  }, [type]);
 
   useEffect(() => {
     if (!isOnline || !user) {
@@ -264,7 +277,7 @@ export function EntryScreen() {
       amount_cents: amountCents,
       type,
       category_id: selectedCategoryId,
-      source_id: null,
+      source_id: type === 'income' ? selectedSourceId : null,
       goal_id: null,
       note: note.trim() ? note.trim() : null,
       date,
@@ -337,8 +350,14 @@ export function EntryScreen() {
         )}
 
         {categoryError && (
-          <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)]/20 bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">
             {categoryError}
+          </div>
+        )}
+
+        {type === 'income' && incomeSourceError && (
+          <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">
+            {incomeSourceError}
           </div>
         )}
       </div>
@@ -438,6 +457,14 @@ export function EntryScreen() {
           </div>
         )}
       </section>
+
+      {type === 'income' && (
+        <IncomeSourceSelector
+          selectedSourceId={selectedSourceId}
+          onSelect={setSelectedSourceId}
+          disabled={isSubmitting}
+        />
+      )}
 
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
         <label

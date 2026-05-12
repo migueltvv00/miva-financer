@@ -1,6 +1,7 @@
 import { BudgetScreen } from '@/features/budgets/BudgetScreen';
 import { CategoryList } from '@/features/categories/CategoryList';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { IncomeSourceList } from '@/features/income-sources/IncomeSourceList';
 import { useAuth } from '@/hooks/useAuth';
 
 export function SettingsScreen() {
@@ -32,11 +33,12 @@ export function SettingsScreen() {
         </div>
 
         <CategoryList userId={user?.id} loadError={categoryError} />
+        <IncomeSourceList userId={user?.id} />
         <BudgetScreen userId={user?.id} categoryError={categoryError} />
 
         <button
           onClick={handleSignOut}
-          className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-danger)] px-4 py-2.5 text-sm font-medium text-[var(--color-danger)] transition-colors hover:bg-red-50"
+          className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-danger)] px-4 py-2.5 text-sm font-medium text-[var(--color-danger)] transition-colors hover:bg-[var(--color-bg)]"
         >
           Terminar sessão
         </button>
