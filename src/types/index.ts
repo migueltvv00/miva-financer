@@ -67,3 +67,12 @@ export interface SavingsGoal {
   is_complete: boolean;
   created_at: string;
 }
+
+export interface NetWorthEntry {
+  id: string;
+  user_id: string;
+  month: string;
+  assets_json: Record<string, number>;
+  liabilities_json: Record<string, number>;
+  created_at: string;
+}
