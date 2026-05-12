@@ -18,6 +18,8 @@ export interface Transaction {
   category_id: string;
   source_id: string | null;
   goal_id: string | null;
+  import_session_id: string | null;
+  instalment_id: string | null;
   note: string | null;
   date: string;
   is_recurring: boolean;
@@ -74,5 +76,48 @@ export interface NetWorthEntry {
   month: string;
   assets_json: Record<string, number>;
   liabilities_json: Record<string, number>;
+  created_at: string;
+}
+
+export interface ImportSession {
+  id: string;
+  user_id: string;
+  bank: string;
+  filename: string;
+  row_count: number;
+  imported_count: number;
+  created_at: string;
+}
+
+export interface Instalment {
+  id: string;
+  user_id: string;
+  name: string;
+  total_cents: number;
+  instalment_cents: number;
+  num_instalments: number;
+  paid_instalments: number;
+  start_month: string;
+  category_id: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface InvestmentAccount {
+  id: string;
+  user_id: string;
+  name: string;
+  type: 'etf' | 'ppr' | 'stock' | 'savings' | 'other';
+  color: string;
+  created_at: string;
+}
+
+export interface InvestmentSnapshot {
+  id: string;
+  user_id: string;
+  account_id: string;
+  month: string;
+  value_cents: number;
+  cost_basis_cents: number;
   created_at: string;
 }

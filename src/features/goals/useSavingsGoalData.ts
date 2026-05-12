@@ -325,6 +325,8 @@ export function useSavingsGoalData(
         category_id: poupancaCategory.id,
         source_id: null,
         goal_id: goalId,
+        import_session_id: null,
+        instalment_id: null,
         note,
         date: getTodayDateValue(),
         is_recurring: false,

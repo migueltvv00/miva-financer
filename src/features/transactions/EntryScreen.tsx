@@ -299,6 +299,8 @@ export function EntryScreen() {
       category_id: selectedCategoryId,
       source_id: type === 'income' ? selectedSourceId : null,
       goal_id: null,
+      import_session_id: null,
+      instalment_id: null,
       note: note.trim() ? note.trim() : null,
       date,
       is_recurring: isRecurring,
