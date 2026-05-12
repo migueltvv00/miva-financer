@@ -6,6 +6,7 @@ import { AuthScreen } from '@/features/auth/AuthScreen';
 import { EntryScreen } from '@/features/transactions/EntryScreen';
 import { TransactionListScreen } from '@/features/transactions/TransactionListScreen';
 import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
+import { GoalsScreen } from '@/features/goals/GoalsScreen';
 import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
 
@@ -87,6 +88,7 @@ export function App() {
           <Route index element={<EntryScreen />} />
           <Route path="transacoes" element={<TransactionListScreen />} />
           <Route path="resumo" element={<DashboardScreen />} />
+          <Route path="objetivos" element={<GoalsScreen />} />
           <Route path="definicoes" element={<SettingsScreen />} />
         </Route>
       </Routes>
