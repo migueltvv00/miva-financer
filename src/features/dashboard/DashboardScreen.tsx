@@ -12,8 +12,14 @@ import {
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
 import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
-import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
+import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
+import { useInstalmentData } from '@/features/instalments/useInstalmentData';
+import {
+  getClampedPaidInstalments,
+  getInstalmentProgress,
+  getRemainingInstalmentCents,
+} from '@/features/instalments/utils';
 import type { MonthlyReportProps } from '@/features/reports/MonthlyReport';
 import { computeCategoryTrends } from '@/features/trends/trendUtils';
 import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
@@ -24,8 +30,9 @@ import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';
 import { useBudgetStore } from '@/store/budgetStore';
 import { useCategoryStore } from '@/store/categoryStore';
+import { useInstalmentStore } from '@/store/instalmentStore';
 import { useTransactionStore } from '@/store/transactionStore';
-import type { Category, Transaction } from '@/types';
+import type { Category, Instalment, Transaction } from '@/types';
 
 interface SummaryCardProps {
   title: string;
@@ -70,6 +77,13 @@ interface IncomeSourceBreakdownItem {
   amountCents: number;
   typeLabel: string | null;
   isArchived: boolean;
+}
+
+interface ActiveInstalmentItem {
+  instalment: Instalment;
+  paidInstalments: number;
+  progress: number;
+  remainingCents: number;
 }
 
 const NO_SOURCE_KEY = '__no_source__';
@@ -157,6 +171,7 @@ export function DashboardScreen() {
   const { user } = useAuth();
   const categories = useCategoryStore((state) => state.categories);
   const isLoadingCategories = useCategoryStore((state) => state.isLoading);
+  const instalments = useInstalmentStore((state) => state.instalments);
   const transactions = useTransactionStore((state) => state.transactions);
   const trendTransactions = useTransactionStore((state) => state.trendTransactions);
   const isLoadingTransactions = useTransactionStore((state) => state.isLoading);
@@ -184,6 +199,10 @@ export function DashboardScreen() {
     error: savingsGoalError,
     isLoading: isLoadingGoals,
   } = useSavingsGoalData(user?.id);
+  const {
+    error: instalmentError,
+    isLoading: isLoadingInstalments,
+  } = useInstalmentData(user?.id);
   const { error: transactionError } = useTransactionData(user?.id, selectedMonth);
   const { error: trendError } = useTrendTransactionData(user?.id, selectedMonth);
 
@@ -222,6 +241,18 @@ export function DashboardScreen() {
   const activeSavingsGoals = useMemo(
     () => goals.filter((goal) => !goal.is_complete),
     [goals]
+  );
+  const activeInstalments = useMemo(
+    () =>
+      instalments
+        .filter((instalment) => instalment.paid_instalments < instalment.num_instalments)
+        .map((instalment) => ({
+          instalment,
+          paidInstalments: getClampedPaidInstalments(instalment),
+          progress: getInstalmentProgress(instalment),
+          remainingCents: getRemainingInstalmentCents(instalment),
+        })) satisfies ActiveInstalmentItem[],
+    [instalments]
   );
 
   const {
@@ -458,6 +489,7 @@ export function DashboardScreen() {
     budgetError,
     incomeSourceError,
     savingsGoalError,
+    instalmentError,
   ].filter((message): message is string => Boolean(message));
 
   const isLoading =
@@ -466,7 +498,8 @@ export function DashboardScreen() {
     isLoadingTransactions ||
     isLoadingTrendTransactions ||
     isLoadingSources ||
-    isLoadingGoals;
+    isLoadingGoals ||
+    isLoadingInstalments;
   const netCents = totalIncome - totalExpenses;
   const monthlyReportProps = useMemo(
     () => {
@@ -946,6 +979,47 @@ export function DashboardScreen() {
           )}
         </div>
       </div>
+
+      {activeInstalments.length > 0 && (
+        <SectionCard
+          title="Prestações Ativas"
+          description="Acompanhe os planos de prestações que ainda têm parcelas por pagar."
+        >
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {activeInstalments.map((item) => (
+              <div
+                key={item.instalment.id}
+                className="rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-semibold text-[var(--color-text)]">
+                      {item.instalment.name}
+                    </h3>
+                    <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+                      {item.paidInstalments}/{item.instalment.num_instalments} pagas
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-[var(--color-accent-light)] px-2 py-1 text-[11px] font-semibold text-[var(--color-accent)]">
+                    {Math.round(item.progress * 100)}%
+                  </span>
+                </div>
+
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-[var(--color-bg-tertiary)]">
+                  <div
+                    className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-300"
+                    style={{ width: `${item.progress * 100}%` }}
+                  />
+                </div>
+
+                <p className="mt-3 text-sm font-medium text-[var(--color-text)]">
+                  Faltam {formatCents(item.remainingCents)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
     </div>
   );
 }

@@ -10,6 +10,8 @@ import {
 } from 'date-fns';
 import { pt } from 'date-fns/locale/pt';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { useInstalmentData } from '@/features/instalments/useInstalmentData';
+import { getInstalmentTransactionPosition } from '@/features/instalments/utils';
 import {
   EditTransactionModal,
   type EditTransactionFormValues,
@@ -20,6 +22,7 @@ import { getRecurringOccurrenceDate } from '@/lib/recurringEngine';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
+import { useInstalmentStore } from '@/store/instalmentStore';
 import { useTransactionStore } from '@/store/transactionStore';
 import type { Category, Transaction } from '@/types';
 
@@ -238,6 +241,7 @@ export function TransactionListScreen() {
   const { user } = useAuth();
   const categories = useCategoryStore((state) => state.categories);
   const isLoadingCategories = useCategoryStore((state) => state.isLoading);
+  const instalments = useInstalmentStore((state) => state.instalments);
   const transactions = useTransactionStore((state) => state.transactions);
   const isLoadingTransactions = useTransactionStore((state) => state.isLoading);
   const setTransactions = useTransactionStore((state) => state.setTransactions);
@@ -266,6 +270,7 @@ export function TransactionListScreen() {
   const suppressRowClickRef = useRef(false);
 
   const { error: categoryError } = useCategoryData(user?.id);
+  const { error: instalmentError } = useInstalmentData(user?.id);
   const {
     error: transactionError,
     isRefreshing,
@@ -275,6 +280,10 @@ export function TransactionListScreen() {
   const categoryMap = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
     [categories]
+  );
+  const instalmentMap = useMemo(
+    () => new Map(instalments.map((instalment) => [instalment.id, instalment])),
+    [instalments]
   );
 
   const filteredTransactions = useMemo(() => {
@@ -722,11 +731,16 @@ export function TransactionListScreen() {
           </div>
         </div>
 
-        {(categoryError || transactionError) && (
+        {(categoryError || instalmentError || transactionError) && (
           <div className="space-y-2">
             {categoryError && (
               <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-red-50 px-3 py-2 text-sm text-[var(--color-danger)]">
                 {categoryError}
+              </div>
+            )}
+            {instalmentError && (
+              <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-red-50 px-3 py-2 text-sm text-[var(--color-danger)]">
+                {instalmentError}
               </div>
             )}
             {transactionError && (
@@ -764,6 +778,12 @@ export function TransactionListScreen() {
               <div className="space-y-2">
                 {group.items.map((transaction) => {
                   const category = getTransactionCategory(categoryMap, transaction);
+                  const instalment = transaction.instalment_id
+                    ? instalmentMap.get(transaction.instalment_id) ?? null
+                    : null;
+                  const instalmentPosition = instalment
+                    ? getInstalmentTransactionPosition(instalment, transaction.date)
+                    : null;
                   const isDeleteOpen = openDeleteActionId === transaction.id;
 
                   return (
@@ -816,10 +836,19 @@ export function TransactionListScreen() {
                             )}
                           </div>
 
-                          {transaction.note && (
-                            <p className="mt-1 truncate text-sm text-[var(--color-text-secondary)]">
-                              {transaction.note}
-                            </p>
+                          {(transaction.note || instalmentPosition !== null) && (
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              {transaction.note && (
+                                <span className="max-w-full truncate text-sm text-[var(--color-text-secondary)]">
+                                  {transaction.note}
+                                </span>
+                              )}
+                              {instalment && instalmentPosition !== null && (
+                                <span className="inline-flex rounded-full bg-[var(--color-accent-light)] px-2 py-1 text-[11px] font-semibold text-[var(--color-accent)]">
+                                  {instalmentPosition}/{instalment.num_instalments} prestações
+                                </span>
+                              )}
+                            </div>
                           )}
                         </div>
 

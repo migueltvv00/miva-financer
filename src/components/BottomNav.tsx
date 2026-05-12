@@ -7,6 +7,7 @@ const tabs = [
   { path: '/tendencias', label: 'Tendências', icon: '📈' },
   { path: '/objetivos', label: 'Objetivos', icon: '🎯' },
   { path: '/patrimonio', label: 'Património', icon: '🏦' },
+  { path: '/investimentos', label: 'Investir', icon: '💹' },
   { path: '/definicoes', label: 'Definições', icon: '⚙️' },
 ] as const;
 

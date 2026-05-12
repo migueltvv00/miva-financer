@@ -1,6 +1,6 @@
 # Fluxo
 
-Personal finance PWA for a single Portuguese user. Log transactions in under 10 seconds, set monthly budget limits, and review a monthly summary dashboard — all synced in real time via Supabase.
+Personal finance PWA for a single Portuguese user. Log transactions in under 10 seconds, set monthly budget limits, track instalment plans, and review a monthly summary dashboard — all synced in real time via Supabase.
 
 ## Tech Stack
 
@@ -76,3 +76,7 @@ src/
 - [x] **Phase 6 — Budget limits** (FIN-5): Per-category monthly limits, copy from last month
 - [x] **Phase 7 — Monthly summary dashboard** (FIN-8): Recharts donut, progress bars, realtime sync
 - [x] **Phase 8 — Recurring transactions** (FIN-10): Toggle, frequency, auto-creation, delete one/all future
+
+### v1.3
+
+- [x] **Phase 2 — Prestação tracking**: Create instalment plans in settings, auto-generate monthly expense transactions, surface instalment badges in the transaction list, and show active plans on the dashboard.
