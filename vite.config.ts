@@ -41,6 +41,14 @@ export default defineConfig({
         clientsClaim: true,
         skipWaiting: true,
         navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/auth/],
+        runtimeCaching: [
+          {
+            // Don't cache Supabase auth API calls
+            urlPattern: /\/auth\/v1\//,
+            handler: 'NetworkOnly',
+          },
+        ],
       },
       devOptions: {
         enabled: true,

@@ -17,30 +17,60 @@ export function useAuth() {
   });
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        isLoading: false,
-      });
-    });
+    let cancelled = false;
+
+    async function initSession() {
+      try {
+        // getSession reads from local storage — may return an expired token
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session) {
+          // Validate the session is still usable by refreshing it
+          const { data: { session: refreshed }, error } =
+            await supabase.auth.refreshSession();
+
+          if (!cancelled) {
+            if (error || !refreshed) {
+              // Refresh failed — token expired or revoked, clear state
+              console.warn('Sessão expirada, será necessário autenticar novamente.');
+              setState({ user: null, session: null, isLoading: false });
+            } else {
+              setState({ user: refreshed.user, session: refreshed, isLoading: false });
+            }
+          }
+        } else {
+          if (!cancelled) {
+            setState({ user: null, session: null, isLoading: false });
+          }
+        }
+      } catch {
+        if (!cancelled) {
+          setState({ user: null, session: null, isLoading: false });
+        }
+      }
+    }
+
+    void initSession();
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (cancelled) return;
       setState({
         user: session?.user ?? null,
         session,
         isLoading: false,
       });
 
-      // Only seed on explicit sign-in, not on INITIAL_SESSION or TOKEN_REFRESHED
       if ((event === 'SIGNED_IN') && session?.user) {
         await seedDefaultCategories(session.user.id);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
