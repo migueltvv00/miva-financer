@@ -163,7 +163,6 @@ export function useMonthlyPlanData(
         console.error('Erro ao guardar rendimento esperado:', err);
         setPlan(previousPlan);
         setError('Não foi possível guardar o rendimento esperado.');
-        throw new Error('Não foi possível guardar o rendimento esperado.');
       }
     },
     [monthKey, plan, setPlan, userId]
@@ -208,7 +207,6 @@ export function useMonthlyPlanData(
         console.error('Erro ao guardar notas do plano:', err);
         setPlan(previousPlan);
         setError('Não foi possível guardar as notas do plano.');
-        throw new Error('Não foi possível guardar as notas do plano.');
       }
     },
     [monthKey, plan, setPlan, userId]
@@ -270,7 +268,6 @@ export function useMonthlyPlanData(
     } catch (err) {
       console.error('Erro ao copiar plano mensal:', err);
       setError('Não foi possível copiar o plano para o próximo mês.');
-      throw new Error('Não foi possível copiar o plano para o próximo mês.');
     }
   }, [monthKey, plan?.expected_income_cents, selectedMonth, userId]);
 

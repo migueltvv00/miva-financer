@@ -17,16 +17,13 @@ interface UseSavingsGoalDataResult {
   addFunds: (goalId: string, amountCents: number) => Promise<boolean>;
 }
 
-function getGoalRecordId(
-  payload: { new: Record<string, unknown>; old: Record<string, unknown> }
-) {
-  const nextId = payload.new.id;
-  if (typeof nextId === 'string') {
-    return nextId;
-  }
+interface RealtimeGoalPayload {
+  new: Partial<SavingsGoal> & { id?: string };
+  old: Partial<SavingsGoal> & { id?: string };
+}
 
-  const previousId = payload.old.id;
-  return typeof previousId === 'string' ? previousId : null;
+function getGoalRecordId(payload: RealtimeGoalPayload): string | null {
+  return payload.new.id ?? payload.old.id ?? null;
 }
 
 export function useSavingsGoalData(

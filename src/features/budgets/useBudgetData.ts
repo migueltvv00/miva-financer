@@ -115,6 +115,8 @@ export function useBudgetData(
         throw new Error('Sessão indisponível.');
       }
 
+      setError(null);
+
       const existingBudget = budgets.find(
         (budget) => budget.category_id === categoryId
       );
@@ -140,6 +142,7 @@ export function useBudgetData(
         } catch (err) {
           console.error('Erro ao eliminar orçamento:', err);
           setBudgets(previousBudgets);
+          setError('Não foi possível eliminar o orçamento.');
           throw err;
         }
 
@@ -162,6 +165,7 @@ export function useBudgetData(
         } catch (err) {
           console.error('Erro ao atualizar orçamento:', err);
           setBudgets(previousBudgets);
+          setError('Não foi possível atualizar o orçamento.');
           throw err;
         }
 
@@ -200,6 +204,7 @@ export function useBudgetData(
       } catch (err) {
         console.error('Erro ao criar orçamento:', err);
         setBudgets(previousBudgets);
+        setError('Não foi possível criar o orçamento.');
         throw err;
       }
     },
@@ -219,6 +224,7 @@ export function useBudgetData(
       throw new Error('Sessão indisponível.');
     }
 
+    setError(null);
     const previousBudgets = budgets;
     const previousMonthKey = getMonthKey(addMonths(selectedMonth, -1));
 
@@ -278,6 +284,7 @@ export function useBudgetData(
     } catch (err) {
       console.error('Erro ao copiar orçamentos:', err);
       setBudgets(previousBudgets);
+      setError('Não foi possível copiar os orçamentos.');
       throw err;
     }
   }, [budgets, monthKey, selectedMonth, setBudgets, userId]);
