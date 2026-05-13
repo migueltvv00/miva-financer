@@ -17,9 +17,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         authorized: false,
-        username: null,
-        linkedAt: null,
-        digestEnabled: false,
+        session: null,
       }),
       { headers: corsHeaders }
     );
@@ -44,9 +42,7 @@ Deno.serve(async (req: Request) => {
     return new Response(
       JSON.stringify({
         authorized: false,
-        username: null,
-        linkedAt: null,
-        digestEnabled: false,
+        session: null,
       }),
       { status: 401, headers: corsHeaders }
     );
@@ -54,28 +50,19 @@ Deno.serve(async (req: Request) => {
 
   const { data: sessionData, error } = await supabase
     .from("telegram_sessions")
-    .select("is_authorized, telegram_username, linked_at, digest_enabled")
+    .select("id, user_id, telegram_chat_id, telegram_username, is_authorized, digest_enabled, linked_at, created_at")
     .eq("user_id", user.id)
     .maybeSingle();
-
-  const data = sessionData as {
-    is_authorized: boolean;
-    telegram_username: string | null;
-    linked_at: string | null;
-    digest_enabled: boolean | null;
-  } | null;
 
   if (error) {
     console.error("Erro ao obter estado do Telegram:", error);
   }
 
-  if (!data) {
+  if (!sessionData) {
     return new Response(
       JSON.stringify({
         authorized: false,
-        username: null,
-        linkedAt: null,
-        digestEnabled: false,
+        session: null,
       }),
       { headers: corsHeaders }
     );
@@ -83,10 +70,8 @@ Deno.serve(async (req: Request) => {
 
   return new Response(
     JSON.stringify({
-      authorized: data.is_authorized,
-      username: data.telegram_username,
-      linkedAt: data.linked_at,
-      digestEnabled: data.digest_enabled ?? false,
+      authorized: sessionData.is_authorized === true,
+      session: sessionData,
     }),
     { headers: corsHeaders }
   );

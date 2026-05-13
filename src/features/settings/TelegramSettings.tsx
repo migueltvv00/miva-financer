@@ -297,17 +297,24 @@ export function TelegramSettings({ userId }: TelegramSettingsProps) {
     setStatus('generating');
 
     try {
+      console.log('[Fluxo:Telegram] generatePin start');
+      // Delete any existing unused pins for this user
+      await supabase.from('telegram_pins').delete().eq('user_id', userId).is('used_at', null);
+
       const generatedPin = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + PIN_EXPIRATION_MS);
       const { error } = await supabase.from('telegram_pins').insert({
+        user_id: userId,
         pin: generatedPin,
         expires_at: expiresAt.toISOString(),
       });
 
       if (error) {
+        console.error('[Fluxo:Telegram] generatePin error', { error });
         throw error;
       }
 
+      console.log('[Fluxo:Telegram] generatePin success', { pin_expires_at: expiresAt.toISOString() });
       setPin(generatedPin);
       setPinExpiresAt(expiresAt);
       setStatus('waiting');
