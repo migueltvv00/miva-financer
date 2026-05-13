@@ -43,6 +43,7 @@ function readQueue() {
     return parsedQueue.filter(isTransaction).map((transaction) => ({
       ...transaction,
       payment_method: transaction.payment_method ?? null,
+      payslip_import_id: transaction.payslip_import_id ?? null,
     }));
   } catch (error) {
     console.error('Erro ao ler a fila offline:', error);

@@ -335,6 +335,7 @@ export function useSavingsGoalData(
         created_at: timestamp,
         updated_at: timestamp,
         payment_method: null,
+        payslip_import_id: null,
       };
 
       setError(null);

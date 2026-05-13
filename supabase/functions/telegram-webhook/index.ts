@@ -102,6 +102,15 @@ interface TransactionRecord {
   date: string;
 }
 
+interface PayslipImportRecord {
+  month: string;
+  employer_name: string | null;
+  net_salary_cents: number;
+  irs_withheld_cents: number;
+  ss_withheld_cents: number;
+  created_at: string;
+}
+
 interface ParsedTransaction {
   amount_cents: number;
   category_hint: string;
@@ -205,6 +214,9 @@ async function handleMessage(message: TelegramMessage) {
       return;
     case "/quota":
       await handleQuotaCommand(chatId, session.user_id);
+      return;
+    case "/recibo":
+      await handleReciboCommand(chatId);
       return;
     case "/cancelar":
       log("cmd_cancelar", "start", chatId);
@@ -587,6 +599,54 @@ async function handleQuotaCommand(chatId: string, userId: string) {
   });
 
   log("cmd_quota", "success", chatId, { requests, total_tokens: totalTokens });
+}
+
+async function handleReciboCommand(chatId: string) {
+  log("cmd_recibo", "start", chatId);
+
+  const session = await getAuthorizedSession(chatId);
+  if (!session?.user_id) {
+    log("cmd_recibo", "error", chatId, { reason: "unauthorized" });
+    await sendMessage(chatId, "❌ Sessão não autorizada. Usa /start para ligar a conta.");
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("payslip_imports")
+    .select("month, employer_name, net_salary_cents, irs_withheld_cents, ss_withheld_cents, created_at")
+    .eq("user_id", session.user_id)
+    .eq("status", "done")
+    .order("month", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const lastPayslip = data as PayslipImportRecord | null;
+
+  if (error) {
+    log("cmd_recibo", "error", chatId, { error: getErrorMessage(error) });
+    await sendMessage(chatId, "Não foi possível obter o último recibo.");
+    return;
+  }
+
+  if (!lastPayslip) {
+    await sendMessage(chatId, "Ainda não importaste nenhum recibo.");
+    log("cmd_recibo", "success", chatId, { found: false });
+    return;
+  }
+
+  const monthLabel = formatPayslipMonth(lastPayslip.month);
+  const netFormatted = formatEuroCents(lastPayslip.net_salary_cents);
+  const irsFormatted = formatEuroCents(lastPayslip.irs_withheld_cents);
+  const ssFormatted = formatEuroCents(lastPayslip.ss_withheld_cents);
+  const importedAt = new Date(lastPayslip.created_at).toLocaleDateString("pt-PT", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+  const msg = `📄 *Recibo ${monthLabel}*\nEntidade: ${lastPayslip.employer_name || "—"}\nLíquido: ${netFormatted}\nIRS: ${irsFormatted}   SS: ${ssFormatted}\n_Importado em: ${importedAt}_`;
+  await sendMessage(chatId, msg, undefined, "Markdown");
+  log("cmd_recibo", "success", chatId, { found: true, month: lastPayslip.month });
 }
 
 async function handleDesligarCommand(chatId: string) {
@@ -1171,6 +1231,41 @@ function formatCents(cents: number): string {
   return `${sign}€${formatted}`;
 }
 
+function formatEuroCents(cents: number): string {
+  return (cents / 100).toLocaleString("pt-PT", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+  });
+}
+
+function formatPayslipMonth(monthStr: string): string {
+  const months = [
+    "janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho",
+    "julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+  ];
+  const parts = monthStr.replace(/-01$/, "").split("-");
+  const year = parts[0];
+  const monthPart = parts[1];
+
+  if (!year || !monthPart) {
+    return monthStr;
+  }
+
+  const monthIdx = Number.parseInt(monthPart, 10) - 1;
+  return `${months[monthIdx] ?? monthStr} ${year}`;
+}
+
 function formatDate(dateStr: string): string {
   const [year, month, day] = dateStr.split("-");
   if (!year || !month || !day) {
@@ -1207,6 +1302,7 @@ function getHelpText() {
     "/resumo — ver rendimento, despesas e saldo do mês",
     "/ultimas — listar as últimas 5 transações",
     "/quota — ver o uso do Gemini hoje",
+    "/recibo — ver o último recibo importado",
     "/cancelar — cancelar a ação pendente",
     "/desligar — desligar esta conta do bot",
     "/ajuda — mostrar esta ajuda",
@@ -1275,13 +1371,15 @@ async function callTelegram(method: string, payload: Record<string, unknown>) {
 async function sendMessage(
   chatId: string,
   text: string,
-  replyMarkup?: Record<string, unknown>
+  replyMarkup?: Record<string, unknown>,
+  parseMode?: "Markdown" | "MarkdownV2" | "HTML"
 ) {
   await callTelegram("sendMessage", {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
   });
 }
 

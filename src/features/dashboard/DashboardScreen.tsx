@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { MealCardWidget } from '@/features/dashboard/MealCardWidget';
 import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
@@ -671,6 +672,8 @@ export function DashboardScreen() {
               toneClassName={getValueToneClass(netCents)}
             />
           </div>
+
+          {user && <MealCardWidget userId={user.id} />}
 
           <Suspense
             fallback={

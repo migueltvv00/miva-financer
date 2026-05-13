@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { useAuth } from '@/hooks/useAuth';
 import { AppLayout } from '@/components/AppLayout';
@@ -13,10 +13,39 @@ import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { ImportScreen } from '@/features/import/ImportScreen';
 import { TrendsScreen } from '@/features/trends/TrendsScreen';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
+import { supabase } from '@/lib/supabase';
+
+function AuthLoadingScreen() {
+  return (
+    <div className="flex h-full items-center justify-center">
+      <div className="text-[var(--color-text-secondary)]">A carregar…</div>
+    </div>
+  );
+}
+
+function useLoadingTimeout(isLoading: boolean, timeoutMs = 5000) {
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setLoadingTimedOut(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setLoadingTimedOut(true);
+    }, timeoutMs);
+
+    return () => window.clearTimeout(timer);
+  }, [isLoading, timeoutMs]);
+
+  return loadingTimedOut;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const processedUserIdRef = useRef<string | null>(null);
+  const loadingTimedOut = useLoadingTimeout(isLoading);
 
   const userId = user?.id ?? null;
 
@@ -37,12 +66,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     });
   }, [userId]);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-[var(--color-text-secondary)]">A carregar…</div>
-      </div>
-    );
+  if (isLoading && !loadingTimedOut) {
+    return <AuthLoadingScreen />;
   }
 
   if (!user) {
@@ -54,17 +79,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const loadingTimedOut = useLoadingTimeout(isLoading);
 
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-[var(--color-text-secondary)]">A carregar…</div>
-      </div>
-    );
+  if (isLoading && !loadingTimedOut) {
+    return <AuthLoadingScreen />;
   }
 
   if (user) {
-    
     return <Navigate to="/" replace />;
   }
 
@@ -72,6 +93,26 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        return;
+      }
+
+      void supabase.auth.getSession().then(({ error }) => {
+        if (error) {
+          console.error('Erro ao revalidar sessão:', error);
+        }
+      });
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
   return (
     <BrowserRouter>
       <Routes>

@@ -326,6 +326,7 @@ export function EntryScreen() {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       payment_method: paymentMethod,
+      payslip_import_id: null,
     };
 
     setIsSubmitting(true);

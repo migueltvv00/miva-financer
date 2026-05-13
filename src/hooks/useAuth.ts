@@ -18,34 +18,51 @@ export function useAuth() {
 
   useEffect(() => {
     let cancelled = false;
+    let authEventHandled = false;
+
+    const setAuthState = (session: Session | null) => {
+      if (cancelled) {
+        return;
+      }
+
+      setState({
+        user: session?.user ?? null,
+        session,
+        isLoading: false,
+      });
+    };
 
     async function initSession() {
       try {
         // getSession reads from local storage — may return an expired token
         const { data: { session } } = await supabase.auth.getSession();
 
+        if (cancelled || authEventHandled) {
+          return;
+        }
+
         if (session) {
           // Validate the session is still usable by refreshing it
           const { data: { session: refreshed }, error } =
             await supabase.auth.refreshSession();
 
-          if (!cancelled) {
-            if (error || !refreshed) {
-              // Refresh failed — token expired or revoked, clear state
-              console.warn('Sessão expirada, será necessário autenticar novamente.');
-              setState({ user: null, session: null, isLoading: false });
-            } else {
-              setState({ user: refreshed.user, session: refreshed, isLoading: false });
-            }
+          if (cancelled || authEventHandled) {
+            return;
+          }
+
+          if (error || !refreshed) {
+            // Refresh failed — token expired or revoked, clear state
+            console.warn('Sessão expirada, será necessário autenticar novamente.');
+            setAuthState(null);
+          } else {
+            setAuthState(refreshed);
           }
         } else {
-          if (!cancelled) {
-            setState({ user: null, session: null, isLoading: false });
-          }
+          setAuthState(null);
         }
       } catch {
-        if (!cancelled) {
-          setState({ user: null, session: null, isLoading: false });
+        if (!authEventHandled) {
+          setAuthState(null);
         }
       }
     }
@@ -56,13 +73,23 @@ export function useAuth() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (cancelled) return;
-      setState({
-        user: session?.user ?? null,
-        session,
-        isLoading: false,
-      });
 
-      if ((event === 'SIGNED_IN') && session?.user) {
+      authEventHandled = true;
+
+      if (event === 'TOKEN_REFRESHED' && !session) {
+        console.warn('Token refresh resulted in null session — treating as signed out.');
+        setAuthState(null);
+        return;
+      }
+
+      if (event === 'SIGNED_OUT') {
+        setAuthState(null);
+        return;
+      }
+
+      setAuthState(session);
+
+      if (event === 'SIGNED_IN' && session?.user) {
         await seedDefaultCategories(session.user.id);
       }
     });

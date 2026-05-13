@@ -166,6 +166,7 @@ export function useImportData(
           created_at: timestamp,
           updated_at: timestamp,
           payment_method: null,
+          payslip_import_id: null,
         }));
 
         const { error: insertError } = await supabase.from('transactions').insert(rows);

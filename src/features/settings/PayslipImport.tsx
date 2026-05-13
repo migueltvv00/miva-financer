@@ -7,6 +7,7 @@ import {
   type ChangeEvent,
   type DragEvent,
 } from 'react';
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
 import { supabase } from '@/lib/supabase';
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
@@ -46,6 +47,8 @@ interface ExtractedPayslipData {
   ss_withheld_cents: number;
   other_deductions_cents: number;
   net_salary_cents: number;
+  meal_card_cents: number | null;
+  total_gross_cents: number | null;
   employer_name: string | null;
   needsReview: boolean;
   deltaCents: number;
@@ -210,6 +213,8 @@ function normalizeExtractedData(payload: unknown): ExtractedPayslipData | null {
     const ssWithheldCents = getNumberField(candidate, 'ss_withheld_cents');
     const otherDeductionsCents = getNumberField(candidate, 'other_deductions_cents') ?? 0;
     const netSalaryCents = getNumberField(candidate, 'net_salary_cents');
+    const mealCardCents = getNumberField(candidate, 'meal_card_cents');
+    const totalGrossCents = getNumberField(candidate, 'total_gross_cents');
 
     if (
       !payslipImportId ||
@@ -239,6 +244,8 @@ function normalizeExtractedData(payload: unknown): ExtractedPayslipData | null {
       ss_withheld_cents: ssWithheldCents,
       other_deductions_cents: otherDeductionsCents,
       net_salary_cents: netSalaryCents,
+      meal_card_cents: mealCardCents,
+      total_gross_cents: totalGrossCents,
       employer_name: getStringField(candidate, 'employer_name'),
       needsReview:
         getBooleanField(candidate, 'needsReview') ??
@@ -343,6 +350,8 @@ export function PayslipImport({ userId }: PayslipImportProps) {
   const [duplicateState, setDuplicateState] = useState<DuplicateState | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [deletingImportId, setDeletingImportId] = useState<string | null>(null);
+  const [showRawPreview, setShowRawPreview] = useState(false);
+  const [expandedDeductions, setExpandedDeductions] = useState<Set<string>>(new Set());
 
   const getAccessToken = useCallback(async () => {
     const {
@@ -459,6 +468,9 @@ export function PayslipImport({ userId }: PayslipImportProps) {
           throw new Error(getErrorMessage(payload, 'Não foi possível ler o recibo.'));
         }
 
+        console.log('[Fluxo:Payslip] upload response', { payload });
+        
+
         const normalizedData = normalizeExtractedData(payload);
 
         if (!normalizedData) {
@@ -470,6 +482,24 @@ export function PayslipImport({ userId }: PayslipImportProps) {
         });
         setExtractedData(normalizedData);
         setPhase('review');
+
+        try {
+          if ('Notification' in window) {
+            const storedPermission = localStorage.getItem('fluxo-push-permission');
+            if (storedPermission === null) {
+              const result = await Notification.requestPermission();
+              localStorage.setItem('fluxo-push-permission', result);
+            }
+            if (Notification.permission === 'granted') {
+              new Notification('Recibo processado ✅', {
+                body: `Líquido: ${formatCents(normalizedData.net_salary_cents)} — revê os valores antes de confirmar.`,
+                icon: '/pwa-192x192.png',
+              });
+            }
+          }
+        } catch {
+          // Non-critical
+        }
       } catch (uploadError) {
         console.error('Erro ao importar recibo:', uploadError);
         console.log('[Fluxo:Payslip] upload error', { uploadError });
@@ -619,12 +649,63 @@ export function PayslipImport({ userId }: PayslipImportProps) {
       const createdTransactions =
         getCreatedTransactionCount(payload) ?? getDefaultCreatedTransactions(extractedData);
       const importedMonth = formatMonthLabel(extractedData.month);
+      const netFormatted = formatCents(extractedData.net_salary_cents);
 
       await fetchImports();
       setFeedback({
         type: 'success',
-        message: `✅ ${createdTransactions} transações criadas para ${importedMonth}`,
+        message: `✅ ${createdTransactions} transações criadas para ${importedMonth}\n💰 Rendimento de ${netFormatted} registado`,
       });
+
+      try {
+        const payslipMonth = extractedData.month;
+        const monthDate = `${payslipMonth}-01`;
+
+        if (userId) {
+          const { data: incomeCats, error: incomeCatsError } = await supabase
+            .from('categories')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('type', 'income')
+            .ilike('name', '%sal%rio%')
+            .limit(1);
+
+          if (incomeCatsError) {
+            throw incomeCatsError;
+          }
+
+          const salaryCatId = incomeCats?.[0]?.id;
+          if (salaryCatId) {
+            const { data: existingBudget, error: existingBudgetError } = await supabase
+              .from('budgets')
+              .select('id, limit_cents')
+              .eq('user_id', userId)
+              .eq('category_id', salaryCatId)
+              .eq('month', monthDate)
+              .maybeSingle();
+
+            if (existingBudgetError) {
+              throw existingBudgetError;
+            }
+
+            if (!existingBudget) {
+              const { error: insertBudgetError } = await supabase.from('budgets').insert({
+                user_id: userId,
+                category_id: salaryCatId,
+                month: monthDate,
+                limit_cents: extractedData.net_salary_cents,
+              });
+
+              if (insertBudgetError) {
+                throw insertBudgetError;
+              }
+            }
+          }
+        }
+      } catch (budgetError) {
+        console.error('Budget auto-fill error:', budgetError);
+      }
+
       setExtractedData(null);
       setPendingFile(null);
       setDuplicateState(null);
@@ -690,6 +771,11 @@ export function PayslipImport({ userId }: PayslipImportProps) {
       setImports((currentImports) =>
         currentImports.filter((currentImport) => currentImport.id !== importItem.id)
       );
+      setExpandedDeductions((currentExpanded) => {
+        const nextExpanded = new Set(currentExpanded);
+        nextExpanded.delete(importItem.id);
+        return nextExpanded;
+      });
       setFeedback({
         type: 'success',
         message: `Recibo de ${formatMonthLabel(importItem.month)} apagado com sucesso.`,
@@ -729,7 +815,7 @@ export function PayslipImport({ userId }: PayslipImportProps) {
 
           {feedback && (
             <div
-              className={`rounded-[var(--radius-md)] border px-4 py-3 text-sm font-medium ${
+              className={`whitespace-pre-line rounded-[var(--radius-md)] border px-4 py-3 text-sm font-medium ${
                 feedback.type === 'success'
                   ? 'border-[var(--color-success)] bg-[var(--color-accent-light)] text-[var(--color-success)]'
                   : 'border-[var(--color-danger)] bg-[var(--color-bg-secondary)] text-[var(--color-danger)]'
@@ -805,6 +891,70 @@ export function PayslipImport({ userId }: PayslipImportProps) {
                 <div className="rounded-[var(--radius-md)] border border-[var(--color-warning)] bg-[var(--color-bg-secondary)] px-4 py-3 text-sm text-[var(--color-warning)]">
                   ⚠️ Os valores extraídos não são consistentes (bruto - descontos ≠ líquido, Δ ={' '}
                   {formatCents(Math.abs(extractedData.deltaCents))}). Verifica antes de confirmar.
+                </div>
+              )}
+
+              <button
+                type="button"
+                onClick={() => setShowRawPreview(!showRawPreview)}
+                className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text)]"
+              >
+                <span>{showRawPreview ? '▼' : '▶'}</span>
+                <span>Ver extracção original</span>
+              </button>
+
+              {showRawPreview && (
+                <div className="space-y-2 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-tertiary)] p-4 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-[var(--color-text-secondary)]">Entidade</span>
+                    <span className="font-medium">{extractedData.employer_name || '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--color-text-secondary)]">Mês</span>
+                    <span className="font-medium">{formatMonthLabel(extractedData.month)}</span>
+                  </div>
+                  <div className="border-t border-[var(--color-divider)] pt-2">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">Vencimento base</span>
+                      <span className="font-medium">{formatCents(extractedData.gross_salary_cents)}</span>
+                    </div>
+                  </div>
+                  {extractedData.meal_card_cents != null && extractedData.meal_card_cents > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">Subsídio de refeição</span>
+                      <span className="font-medium">{formatCents(extractedData.meal_card_cents)}</span>
+                    </div>
+                  )}
+                  {extractedData.total_gross_cents != null && extractedData.total_gross_cents > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">Total ilíquido</span>
+                      <span className="font-medium">{formatCents(extractedData.total_gross_cents)}</span>
+                    </div>
+                  )}
+                  <div className="border-t border-[var(--color-divider)] pt-2">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">IRS retido</span>
+                      <span className="font-medium">{formatCents(extractedData.irs_withheld_cents)}</span>
+                    </div>
+                    <div className="mt-1 flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">Segurança Social</span>
+                      <span className="font-medium">{formatCents(extractedData.ss_withheld_cents)}</span>
+                    </div>
+                    {extractedData.other_deductions_cents > 0 && (
+                      <div className="mt-1 flex justify-between">
+                        <span className="text-[var(--color-text-secondary)]">Outras deduções</span>
+                        <span className="font-medium">{formatCents(extractedData.other_deductions_cents)}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="border-t border-[var(--color-divider)] pt-2">
+                    <div className="flex justify-between">
+                      <span className="text-[var(--color-text-secondary)]">💰 Líquido recebido</span>
+                      <span className="font-semibold text-[var(--color-text)]">
+                        {formatCents(extractedData.net_salary_cents)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -889,6 +1039,42 @@ export function PayslipImport({ userId }: PayslipImportProps) {
         </div>
 
         <div className="mt-4 space-y-3">
+          {imports.filter((item) => item.status === 'done').length >= 2 && (
+            <div className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                Evolução salarial
+              </p>
+              <ResponsiveContainer width="100%" height={80}>
+                <BarChart
+                  data={imports
+                    .filter((item) => item.status === 'done')
+                    .slice(0, 6)
+                    .reverse()
+                    .map((item) => ({
+                      month: formatMonthLabel(item.month).split(' ')[0]?.slice(0, 3) ?? item.month,
+                      net: item.net_salary_cents,
+                    }))}
+                >
+                  <XAxis
+                    dataKey="month"
+                    tick={{ fontSize: 10, fill: 'var(--color-text-tertiary)' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    formatter={(value: number) => [formatCents(value), 'Líquido']}
+                    contentStyle={{
+                      fontSize: 12,
+                      borderRadius: 8,
+                      border: '1px solid var(--color-border)',
+                    }}
+                  />
+                  <Bar dataKey="net" fill="var(--color-accent)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
           {isHistoryLoading ? (
             <p className="text-sm text-[var(--color-text-secondary)]">A carregar recibos importados…</p>
           ) : imports.length === 0 ? (
@@ -903,40 +1089,100 @@ export function PayslipImport({ userId }: PayslipImportProps) {
                 return (
                   <div
                     key={importItem.id}
-                    className="flex flex-col gap-4 py-4 sm:flex-row sm:items-center sm:justify-between"
+                    className="flex flex-col gap-4 py-4 sm:flex-row sm:items-start sm:justify-between"
                   >
-                    <div className="grid gap-3 sm:grid-cols-4 sm:gap-4">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
-                          Mês
-                        </p>
-                        <p className="text-sm font-medium text-[var(--color-text)]">
-                          {formatMonthLabel(importItem.month)}
-                        </p>
+                    <div className="flex-1">
+                      <div className="grid gap-3 sm:grid-cols-4 sm:gap-4">
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                            Mês
+                          </p>
+                          <p className="text-sm font-medium text-[var(--color-text)]">
+                            {formatMonthLabel(importItem.month)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                            Empregador
+                          </p>
+                          <p className="text-sm text-[var(--color-text)]">
+                            {importItem.employer_name ?? '—'}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                            Salário líquido
+                          </p>
+                          <p className="text-sm font-medium text-[var(--color-text)]">
+                            {formatCents(importItem.net_salary_cents)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
+                            Importado em
+                          </p>
+                          <p className="text-sm text-[var(--color-text)]">
+                            {formatImportedAt(importItem.created_at)}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
-                          Empregador
-                        </p>
-                        <p className="text-sm text-[var(--color-text)]">
-                          {importItem.employer_name ?? '—'}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
-                          Salário líquido
-                        </p>
-                        <p className="text-sm font-medium text-[var(--color-text)]">
-                          {formatCents(importItem.net_salary_cents)}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-tertiary)]">
-                          Importado em
-                        </p>
-                        <p className="text-sm text-[var(--color-text)]">
-                          {formatImportedAt(importItem.created_at)}
-                        </p>
+
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedDeductions((prev) => {
+                              const next = new Set(prev);
+                              if (next.has(importItem.id)) {
+                                next.delete(importItem.id);
+                              } else {
+                                next.add(importItem.id);
+                              }
+                              return next;
+                            });
+                          }}
+                          className="text-xs text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-secondary)]"
+                        >
+                          {expandedDeductions.has(importItem.id) ? '▼ Deduções' : '▸ Deduções'}
+                        </button>
+                        {expandedDeductions.has(importItem.id) && (() => {
+                          const gross =
+                            importItem.net_salary_cents +
+                            importItem.irs_withheld_cents +
+                            importItem.ss_withheld_cents;
+                          const irsPct =
+                            gross > 0 ? Math.round((importItem.irs_withheld_cents / gross) * 100) : 0;
+                          const ssPct =
+                            gross > 0 ? Math.round((importItem.ss_withheld_cents / gross) * 100) : 0;
+                          return (
+                            <div className="mt-2 space-y-2">
+                              <div>
+                                <div className="flex justify-between text-xs text-[var(--color-text-secondary)]">
+                                  <span>IRS</span>
+                                  <span>{irsPct}% ({formatCents(importItem.irs_withheld_cents)})</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-[var(--color-bg-tertiary)]">
+                                  <div
+                                    className="h-2 rounded-full bg-[var(--color-danger)]"
+                                    style={{ width: `${Math.min(irsPct, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                              <div>
+                                <div className="flex justify-between text-xs text-[var(--color-text-secondary)]">
+                                  <span>SS</span>
+                                  <span>{ssPct}% ({formatCents(importItem.ss_withheld_cents)})</span>
+                                </div>
+                                <div className="mt-1 h-2 rounded-full bg-[var(--color-bg-tertiary)]">
+                                  <div
+                                    className="h-2 rounded-full bg-[var(--color-accent)]"
+                                    style={{ width: `${Math.min(ssPct, 100)}%` }}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 

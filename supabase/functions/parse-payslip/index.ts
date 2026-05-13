@@ -21,7 +21,9 @@ Extract the following and respond ONLY with valid JSON, no markdown, no extra te
   "other_deductions_cents": integer (all other deductions combined, in cents),
   "net_salary_cents": integer (vencimento líquido, in cents),
   "employer_name": string or null,
-  "employee_name": string or null
+  "employee_name": string or null,
+  "meal_card_cents": integer or null (subsídio de refeição / cartão refeição value in euro cents, null if not found on payslip),
+  "total_gross_cents": integer or null (total ilíquido / remuneração bruta before all deductions in euro cents, null if same as gross_salary_cents)
 }
 Rules:
 - All amounts in euro cents (multiply euros by 100).
@@ -58,6 +60,8 @@ interface ExtractedPayslip {
   net_salary_cents: number;
   employer_name: string | null;
   employee_name: string | null;
+  meal_card_cents: number | null;
+  total_gross_cents: number | null;
 }
 
 interface GeminiResponse {
@@ -151,6 +155,13 @@ function parseMonth(value: unknown): string {
   return trimmed;
 }
 
+function parseOptionalIntegerField(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+  return null;
+}
+
 function parseExtractedPayslip(text: string): ExtractedPayslip {
   const payload = parseJsonRecord(text);
 
@@ -169,6 +180,8 @@ function parseExtractedPayslip(text: string): ExtractedPayslip {
     net_salary_cents: parseIntegerField(payload.net_salary_cents, "net_salary_cents"),
     employer_name: parseNullableString(payload.employer_name, "employer_name"),
     employee_name: parseNullableString(payload.employee_name, "employee_name"),
+    meal_card_cents: parseOptionalIntegerField(payload.meal_card_cents),
+    total_gross_cents: parseOptionalIntegerField(payload.total_gross_cents),
   };
 }
 
@@ -427,6 +440,8 @@ Deno.serve(async (req: Request) => {
       ss_employee_cents: extracted.ss_employee_cents,
       other_deductions_cents: extracted.other_deductions_cents,
       net_salary_cents: extracted.net_salary_cents,
+      meal_card_cents: extracted.meal_card_cents,
+      total_gross_cents: extracted.total_gross_cents,
     });
 
     const validation = buildValidationError(extracted);
@@ -472,6 +487,8 @@ Deno.serve(async (req: Request) => {
         other_deductions_cents: extracted.other_deductions_cents,
         net_salary_cents: extracted.net_salary_cents,
         employer_name: extracted.employer_name,
+        meal_card_cents: extracted.meal_card_cents,
+        total_gross_cents: extracted.total_gross_cents,
         raw_gemini_response: geminiPayload,
         source: "upload",
         status: "pending",

@@ -58,6 +58,7 @@ export interface Transaction {
   created_at: string;
   updated_at: string;
   payment_method: PaymentMethod | null;
+  payslip_import_id: string | null;
 }
 
 export interface Budget {
