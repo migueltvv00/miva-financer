@@ -332,7 +332,7 @@ async function handleStartCommand(message: TelegramMessage, text: string) {
   const { error: sessionError } = await supabase.from("telegram_sessions").upsert(
     {
       user_id: pinRecord.user_id,
-      telegram_chat_id: chatId,
+      telegram_chat_id: message.chat.id,
       telegram_username: username,
       is_authorized: true,
       linked_at: linkedAt,
