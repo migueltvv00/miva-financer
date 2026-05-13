@@ -371,6 +371,36 @@ export function useSavingsGoalData(
           throw updateError;
         }
 
+        // Sync to net_worth_items
+        try {
+          const { data: nwItem } = await supabase
+            .from('net_worth_items')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('source', 'savings_goal')
+            .eq('source_id', goalId)
+            .maybeSingle();
+
+          if (nwItem) {
+            await supabase
+              .from('net_worth_items')
+              .update({ value_cents: nextCurrentCents, updated_at: new Date().toISOString() })
+              .eq('id', nwItem.id);
+          } else {
+            await supabase.from('net_worth_items').insert({
+              user_id: userId,
+              name: goal.name,
+              type: 'asset',
+              value_cents: nextCurrentCents,
+              source: 'savings_goal',
+              source_id: goalId,
+              emoji: goal.emoji,
+            });
+          }
+        } catch {
+          // Non-critical — net worth sync failure doesn't affect the goal
+        }
+
         return nextIsComplete && !goal.is_complete;
       } catch (err) {
         console.error('Erro ao adicionar fundos ao objetivo:', err);

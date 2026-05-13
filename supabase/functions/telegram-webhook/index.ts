@@ -3,13 +3,34 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
-const PAYMENT_METHOD_LABELS: Record<string, string> = {
+type TransactionType = "expense" | "income";
+type PaymentMethod = "cartao_refeicao" | "multibanco" | "mbway" | "numerario" | "credito" | "debito";
+
+const PAYMENT_METHOD_VALUES: PaymentMethod[] = [
+  "cartao_refeicao",
+  "multibanco",
+  "mbway",
+  "numerario",
+  "debito",
+  "credito",
+];
+
+const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cartao_refeicao: "🍽️ Cartão Refeição",
   multibanco: "🏧 Multibanco",
   mbway: "📱 MBWay",
   numerario: "💵 Numerário",
   credito: "💳 Crédito",
   debito: "💳 Débito",
+};
+
+const PAYMENT_METHOD_BUTTON_LABELS: Record<PaymentMethod, string> = {
+  cartao_refeicao: "🍽️ Refeição",
+  multibanco: "🏧 MB",
+  mbway: "📱 MBWay",
+  numerario: "💵 Cash",
+  debito: "💳 Débito",
+  credito: "💳 Crédito",
 };
 
 const supabase = createClient(
@@ -116,20 +137,25 @@ interface ParsedTransaction {
   category_hint: string;
   note: string;
   date: string;
-  type: "expense" | "income";
+  type: TransactionType;
   confidence: number;
-  payment_method: string | null;
+  payment_method: PaymentMethod | null;
 }
 
 interface PendingTransaction {
   amount_cents: number;
-  category_id: string;
-  category_name: string;
-  category_emoji: string;
+  category_id: string | null;
+  category_name: string | null;
+  category_emoji: string | null;
   note: string;
   date: string;
-  type: "expense" | "income";
-  payment_method: string | null;
+  type: TransactionType;
+  payment_method: PaymentMethod | null;
+}
+
+interface ParseTransactionResult {
+  parsed: ParsedTransaction | null;
+  rateLimited: boolean;
 }
 
 interface BudgetProgress {
@@ -218,6 +244,12 @@ async function handleMessage(message: TelegramMessage) {
     case "/recibo":
       await handleReciboCommand(chatId);
       return;
+    case "/gasto":
+      await handleManualTransactionCommand(chatId, userId, text, "expense");
+      return;
+    case "/receita":
+      await handleManualTransactionCommand(chatId, userId, text, "income");
+      return;
     case "/cancelar":
       log("cmd_cancelar", "start", chatId);
       await setPendingTransaction(chatId, null);
@@ -280,13 +312,32 @@ async function handleCallbackQuery(callbackQuery: TelegramCallbackQuery) {
     if (data === "cancel_tx") {
       await answerCallbackQuery(callbackQuery.id, "Cancelado.");
       await setPendingTransaction(chatIdKey, null);
-      await safeEditMessage(chatIdKey, messageId, "Cancelado.");
+      await safeEditMessage(chatIdKey, messageId, "❌ Cancelado.");
       return;
     }
 
     if (data.startsWith("cat_")) {
       await answerCallbackQuery(callbackQuery.id, "Categoria atualizada.");
       await handleCategorySelection(chatIdKey, messageId, session.user_id, data.slice(4));
+      return;
+    }
+
+    if (data.startsWith("mc:")) {
+      await answerCallbackQuery(callbackQuery.id, "Categoria atualizada.");
+      await handleCategorySelection(chatIdKey, messageId, session.user_id, data.slice(3));
+      return;
+    }
+
+    if (data.startsWith("pm:")) {
+      const paymentMethod = normalizePaymentMethod(data.slice(3));
+
+      if (!paymentMethod) {
+        await answerCallbackQuery(callbackQuery.id, "Método inválido.");
+        return;
+      }
+
+      await answerCallbackQuery(callbackQuery.id, "Método atualizado.");
+      await handlePaymentMethodSelection(chatIdKey, messageId, paymentMethod);
       return;
     }
 
@@ -662,8 +713,67 @@ async function handleDesligarCommand(chatId: string) {
   log("cmd_desligar", "success", chatId, { awaiting_confirm: true });
 }
 
+async function handleManualTransactionCommand(
+  chatId: string,
+  userId: string,
+  text: string,
+  type: TransactionType
+) {
+  log("cmd_manual_tx", "start", chatId, { type });
+
+  const parsed = parseManualCommand(text);
+  if (parsed.status === "missing_amount") {
+    await sendMessage(chatId, getManualCommandUsageText(type), undefined, "Markdown");
+    log("cmd_manual_tx", "error", chatId, { type, reason: "missing_amount" });
+    return;
+  }
+
+  if (parsed.status === "invalid_amount") {
+    await sendMessage(chatId, "Valor inválido. Usa um número (ex: 12.50 ou 12,50).");
+    log("cmd_manual_tx", "error", chatId, { type, reason: "invalid_amount" });
+    return;
+  }
+
+  const categories = (await getUserCategories(userId, type)).slice(0, 12);
+  if (categories.length === 0) {
+    await sendMessage(chatId, "Não tens categorias. Cria uma na app.");
+    log("cmd_manual_tx", "error", chatId, { type, reason: "no_categories" });
+    return;
+  }
+
+  const pendingTransaction: PendingTransaction = {
+    amount_cents: parsed.amount_cents,
+    category_id: null,
+    category_name: null,
+    category_emoji: null,
+    note: parsed.note,
+    date: new Date().toISOString().slice(0, 10),
+    type,
+    payment_method: null,
+  };
+
+  await setPendingTransaction(chatId, pendingTransaction);
+  await sendMessage(
+    chatId,
+    buildManualCategoryPrompt(type, parsed.amount_cents, parsed.note),
+    buildCategoryKeyboard(categories, "mc:")
+  );
+
+  log("cmd_manual_tx", "success", chatId, { type, amount_cents: parsed.amount_cents, category_count: categories.length });
+}
+
 async function handleFreeTextMessage(chatId: string, userId: string, text: string) {
-  const parsed = await parseTransactionMessage(chatId, text, userId);
+  const { parsed, rateLimited } = await parseTransactionMessage(chatId, text, userId);
+
+  if (rateLimited) {
+    await sendMessage(
+      chatId,
+      "⚠️ Modelo AI indisponível (limite de pedidos atingido).\nUsa o comando manual:\n`/gasto 12.50 Almoço`\n`/receita 1400 Salário`",
+      undefined,
+      "Markdown"
+    );
+    return;
+  }
 
   if (!parsed || parsed.confidence < 0.7) {
     await sendMessage(chatId, 'Não consegui perceber. Tenta: "café 1.50" ou "salário 1500"');
@@ -689,7 +799,11 @@ async function handleFreeTextMessage(chatId: string, userId: string, text: strin
   };
 
   await setPendingTransaction(chatId, pendingTransaction);
-  await sendMessage(chatId, buildConfirmationText(pendingTransaction), buildConfirmationKeyboard());
+  await sendMessage(
+    chatId,
+    buildConfirmationText(pendingTransaction),
+    buildConfirmationKeyboard(pendingTransaction.payment_method)
+  );
 }
 
 async function handleConfirmTransaction(chatId: string, messageId: number, userId: string) {
@@ -700,15 +814,24 @@ async function handleConfirmTransaction(chatId: string, messageId: number, userI
     return;
   }
 
+  if (!pendingTransaction.category_id || !pendingTransaction.category_name) {
+    await safeEditMessage(chatId, messageId, "Escolhe a categoria primeiro.");
+    return;
+  }
+
+  const categoryId = pendingTransaction.category_id;
+  const categoryName = pendingTransaction.category_name;
+  const categoryEmoji = pendingTransaction.category_emoji ?? "💸";
+
   log("tx_create", "start", chatId, {
-    category: pendingTransaction.category_name,
+    category: categoryName,
     amount_cents: pendingTransaction.amount_cents,
   });
 
   const { error } = await supabase.from("transactions").insert({
     user_id: userId,
     amount_cents: pendingTransaction.amount_cents,
-    category_id: pendingTransaction.category_id,
+    category_id: categoryId,
     type: pendingTransaction.type,
     note: pendingTransaction.note || null,
     date: pendingTransaction.date,
@@ -726,27 +849,27 @@ async function handleConfirmTransaction(chatId: string, messageId: number, userI
 
   await setPendingTransaction(chatId, null);
 
-  let successMessage = "✅ Registado!";
+  let successMessage = `✅ ${formatCents(pendingTransaction.amount_cents)} — ${categoryName} registado!`;
 
   if (pendingTransaction.type === "expense") {
     const budgetProgress = await getBudgetProgress(
       supabase,
       userId,
-      pendingTransaction.category_id
+      categoryId
     );
 
     if (budgetProgress) {
-      successMessage = `✅ Registado!\n\n${pendingTransaction.category_emoji} ${pendingTransaction.category_name}: ${formatCents(budgetProgress.spentCents)} / ${formatCents(budgetProgress.limitCents)} este mês`;
+      successMessage += `\n\n${categoryEmoji} ${categoryName}: ${formatCents(budgetProgress.spentCents)} / ${formatCents(budgetProgress.limitCents)} este mês`;
     }
   }
 
-  if (pendingTransaction.payment_method && PAYMENT_METHOD_LABELS[pendingTransaction.payment_method]) {
+  if (pendingTransaction.payment_method) {
     successMessage += `\n💳 ${PAYMENT_METHOD_LABELS[pendingTransaction.payment_method]}`;
   }
 
   await safeEditMessage(chatId, messageId, successMessage);
   log("tx_create", "success", chatId, {
-    category: pendingTransaction.category_name,
+    category: categoryName,
     amount_cents: pendingTransaction.amount_cents,
   });
 
@@ -754,7 +877,7 @@ async function handleConfirmTransaction(chatId: string, messageId: number, userI
     await checkBudgetAlert(
       supabase,
       userId,
-      pendingTransaction.category_id,
+      categoryId,
       chatId,
       sendMessage
     );
@@ -769,26 +892,13 @@ async function handleEditCategory(chatId: string, messageId: number, userId: str
     return;
   }
 
-  const categories = (await getUserCategories(userId, pendingTransaction.type)).slice(0, 8);
+  const categories = (await getUserCategories(userId, pendingTransaction.type)).slice(0, 12);
   if (categories.length === 0) {
     await safeEditMessage(chatId, messageId, "Não encontrei categorias disponíveis.");
     return;
   }
 
-  const inlineKeyboard: Array<Array<{ text: string; callback_data: string }>> = [];
-
-  for (let index = 0; index < categories.length; index += 2) {
-    inlineKeyboard.push(
-      categories.slice(index, index + 2).map((category) => ({
-        text: `${category.emoji} ${category.name}`,
-        callback_data: `cat_${category.id}`,
-      }))
-    );
-  }
-
-  await safeEditMessage(chatId, messageId, "Escolhe a categoria:", {
-    inline_keyboard: inlineKeyboard,
-  });
+  await safeEditMessage(chatId, messageId, "Escolhe a categoria:", buildCategoryKeyboard(categories, "cat_"));
 }
 
 async function handleCategorySelection(
@@ -809,6 +919,7 @@ async function handleCategorySelection(
     .select("id, name, emoji, type, sort_order")
     .eq("user_id", userId)
     .eq("id", categoryId)
+    .eq("type", pendingTransaction.type)
     .maybeSingle();
 
   const category = categoryData as CategoryRecord | null;
@@ -834,44 +945,167 @@ async function handleCategorySelection(
     chatId,
     messageId,
     buildConfirmationText(updatedPendingTransaction),
-    buildConfirmationKeyboard()
+    buildConfirmationKeyboard(updatedPendingTransaction.payment_method)
+  );
+}
+
+async function handlePaymentMethodSelection(
+  chatId: string,
+  messageId: number,
+  paymentMethod: PaymentMethod
+) {
+  const pendingTransaction = await getPendingTransaction(chatId);
+
+  if (!pendingTransaction) {
+    await safeEditMessage(chatId, messageId, "Não há ações pendentes.");
+    return;
+  }
+
+  const updatedPendingTransaction: PendingTransaction = {
+    ...pendingTransaction,
+    payment_method: paymentMethod,
+  };
+
+  await setPendingTransaction(chatId, updatedPendingTransaction);
+  await safeEditMessage(
+    chatId,
+    messageId,
+    buildConfirmationText(updatedPendingTransaction),
+    buildConfirmationKeyboard(updatedPendingTransaction.payment_method)
   );
 }
 
 function buildConfirmationText(transaction: PendingTransaction) {
   const icon = transaction.type === "income" ? "💰" : "💸";
-  const note = transaction.note ? ` (${transaction.note})` : "";
   const label = transaction.type === "income" ? "receita" : "despesa";
-  let text = `Registar ${label}?\n\n${icon} ${formatCents(transaction.amount_cents)} — ${transaction.category_name}${note}\n📅 ${formatDate(transaction.date)}`;
+  const categoryLabel = transaction.category_name
+    ? `${transaction.category_emoji ? `${transaction.category_emoji} ` : ""}${transaction.category_name}`
+    : "—";
+  const paymentMethodLabel = transaction.payment_method
+    ? PAYMENT_METHOD_LABELS[transaction.payment_method]
+    : "—";
+  const lines = [
+    `Registar ${label}?`,
+    "",
+    `${icon} ${formatCents(transaction.amount_cents)} — ${categoryLabel}`,
+  ];
 
-  if (transaction.payment_method && PAYMENT_METHOD_LABELS[transaction.payment_method]) {
-    text += `\n💳 ${PAYMENT_METHOD_LABELS[transaction.payment_method]}`;
+  if (transaction.note) {
+    lines.push(`📝 ${transaction.note}`);
   }
 
-  return text;
+  lines.push(`📅 ${formatDate(transaction.date)}`);
+  lines.push(`💳 Método: ${paymentMethodLabel}`);
+
+  return lines.join("\n");
 }
 
-function buildConfirmationKeyboard() {
+function buildConfirmationKeyboard(selectedPaymentMethod: PaymentMethod | null) {
+  const paymentMethodRows: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  for (let index = 0; index < PAYMENT_METHOD_VALUES.length; index += 3) {
+    paymentMethodRows.push(
+      PAYMENT_METHOD_VALUES.slice(index, index + 3).map((paymentMethod) => ({
+        text: paymentMethod === selectedPaymentMethod
+          ? `✅ ${PAYMENT_METHOD_BUTTON_LABELS[paymentMethod]}`
+          : PAYMENT_METHOD_BUTTON_LABELS[paymentMethod],
+        callback_data: `pm:${paymentMethod}`,
+      }))
+    );
+  }
+
   return {
     inline_keyboard: [
+      ...paymentMethodRows,
       [
-        { text: "✅ Sim", callback_data: "confirm_tx" },
-        { text: "✏️ Editar categoria", callback_data: "edit_category" },
+        { text: "✅ Confirmar", callback_data: "confirm_tx" },
         { text: "❌ Cancelar", callback_data: "cancel_tx" },
       ],
+      [{ text: "✏️ Editar categoria", callback_data: "edit_category" }],
     ],
   };
+}
+
+function buildCategoryKeyboard(categories: CategoryRecord[], callbackPrefix: "cat_" | "mc:") {
+  const inlineKeyboard: Array<Array<{ text: string; callback_data: string }>> = [];
+
+  for (let index = 0; index < categories.length; index += 3) {
+    inlineKeyboard.push(
+      categories.slice(index, index + 3).map((category) => ({
+        text: `${category.emoji} ${shortenLabel(category.name)}`,
+        callback_data: `${callbackPrefix}${category.id}`,
+      }))
+    );
+  }
+
+  return { inline_keyboard: inlineKeyboard };
+}
+
+function buildManualCategoryPrompt(type: TransactionType, amountCents: number, note: string) {
+  const label = type === "income" ? "Receita" : "Despesa";
+  return [
+    `📝 ${label}: ${formatCents(amountCents)}`,
+    ...(note ? [note] : []),
+    "",
+    "Escolhe a categoria:",
+  ].join("\n");
+}
+
+function parseManualCommand(text: string):
+  | { status: "ok"; amount_cents: number; note: string }
+  | { status: "missing_amount" }
+  | { status: "invalid_amount" } {
+  const match = text.trim().match(/^\/\w+(?:@[\w_]+)?(?:\s+(\S+)(?:\s+([\s\S]+))?)?$/i);
+  const rawAmount = match?.[1]?.trim();
+
+  if (!rawAmount) {
+    return { status: "missing_amount" };
+  }
+
+  const amountCents = parseEuroAmountToCents(rawAmount);
+  if (amountCents === null) {
+    return { status: "invalid_amount" };
+  }
+
+  return {
+    status: "ok",
+    amount_cents: amountCents,
+    note: match?.[2]?.trim() ?? "",
+  };
+}
+
+function parseEuroAmountToCents(value: string) {
+  const normalized = value.trim().replace(/\s+/g, "").replace(",", ".");
+  const match = normalized.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const eurosPart = Number.parseInt(match[1], 10);
+  const centsPart = Number.parseInt((match[2] ?? "").padEnd(2, "0"), 10) || 0;
+  const amountCents = eurosPart * 100 + centsPart;
+
+  return Number.isSafeInteger(amountCents) && amountCents > 0 ? amountCents : null;
+}
+
+function getManualCommandUsageText(type: TransactionType) {
+  if (type === "income") {
+    return "Uso: `/receita 1400 Salário`\nExemplos: `/receita 1400 Salário`, `/receita 250 Prémio`";
+  }
+
+  return "Uso: `/gasto 12.50 Almoço`\nExemplos: `/gasto 3,20`, `/gasto 45 Supermercado`";
 }
 
 async function parseTransactionMessage(
   chatId: string,
   message: string,
   userId: string
-): Promise<ParsedTransaction | null> {
+): Promise<ParseTransactionResult> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {
     log("gemini_parse", "error", chatId, { reason: "missing_api_key" });
-    return null;
+    return { parsed: null, rateLimited: false };
   }
 
   const startedAt = Date.now();
@@ -880,24 +1114,40 @@ async function parseTransactionMessage(
 
   log("gemini_parse", "start", chatId);
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    }
-  );
-
-  if (!response.ok) {
+  let response: Response;
+  try {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+        }),
+      }
+    );
+  } catch (error) {
+    const errorMessage = getErrorMessage(error);
     log("gemini_parse", "error", chatId, {
       duration_ms: Date.now() - startedAt,
       reason: "request_failed",
-      error: await response.text(),
+      error: errorMessage,
     });
-    return null;
+    return { parsed: null, rateLimited: isGeminiRateLimitError(undefined, errorMessage) };
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    log("gemini_parse", "error", chatId, {
+      duration_ms: Date.now() - startedAt,
+      reason: "request_failed",
+      status_code: response.status,
+      error: errorText,
+    });
+    return {
+      parsed: null,
+      rateLimited: isGeminiRateLimitError(response.status, errorText),
+    };
   }
 
   const payload = (await response.json()) as {
@@ -933,7 +1183,7 @@ async function parseTransactionMessage(
       duration_ms: Date.now() - startedAt,
       reason: "empty_response",
     });
-    return null;
+    return { parsed: null, rateLimited: false };
   }
 
   const cleaned = rawText.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
@@ -943,7 +1193,7 @@ async function parseTransactionMessage(
       confidence: null,
       parsed: false,
     });
-    return null;
+    return { parsed: null, rateLimited: false };
   }
 
   try {
@@ -954,7 +1204,7 @@ async function parseTransactionMessage(
         duration_ms: Date.now() - startedAt,
         reason: "invalid_payload",
       });
-      return null;
+      return { parsed: null, rateLimited: false };
     }
 
     if (
@@ -968,7 +1218,7 @@ async function parseTransactionMessage(
         duration_ms: Date.now() - startedAt,
         reason: "schema_validation_failed",
       });
-      return null;
+      return { parsed: null, rateLimited: false };
     }
 
     log("gemini_parse", "success", chatId, {
@@ -977,13 +1227,16 @@ async function parseTransactionMessage(
     });
 
     return {
-      amount_cents: parsed.amount_cents,
-      category_hint: typeof parsed.category_hint === "string" ? parsed.category_hint : "",
-      note: typeof parsed.note === "string" ? parsed.note.trim() : "",
-      date: parsed.date,
-      type: parsed.type,
-      confidence: parsed.confidence,
-      payment_method: typeof parsed.payment_method === "string" ? parsed.payment_method : null,
+      parsed: {
+        amount_cents: parsed.amount_cents,
+        category_hint: typeof parsed.category_hint === "string" ? parsed.category_hint : "",
+        note: typeof parsed.note === "string" ? parsed.note.trim() : "",
+        date: parsed.date,
+        type: parsed.type,
+        confidence: parsed.confidence,
+        payment_method: normalizePaymentMethod(parsed.payment_method),
+      },
+      rateLimited: false,
     };
   } catch (error) {
     log("gemini_parse", "error", chatId, {
@@ -991,7 +1244,7 @@ async function parseTransactionMessage(
       reason: "json_parse_failed",
       error: getErrorMessage(error),
     });
-    return null;
+    return { parsed: null, rateLimited: false };
   }
 }
 
@@ -1303,6 +1556,8 @@ function getHelpText() {
     "/ultimas — listar as últimas 5 transações",
     "/quota — ver o uso do Gemini hoje",
     "/recibo — ver o último recibo importado",
+    "/gasto 12.50 almoço — registar despesa manualmente",
+    "/receita 1400 salário — registar receita manualmente",
     "/cancelar — cancelar a ação pendente",
     "/desligar — desligar esta conta do bot",
     "/ajuda — mostrar esta ajuda",
@@ -1315,6 +1570,28 @@ function normalizeCommand(text: string) {
   return text.split(/\s+/)[0]?.toLowerCase() ?? text.toLowerCase();
 }
 
+function normalizePaymentMethod(value: unknown): PaymentMethod | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  return PAYMENT_METHOD_VALUES.includes(value as PaymentMethod)
+    ? (value as PaymentMethod)
+    : null;
+}
+
+function isGeminiRateLimitError(status?: number, message?: string) {
+  if (status === 429) {
+    return true;
+  }
+
+  if (!message) {
+    return false;
+  }
+
+  return /\bquota\b/i.test(message) || /rate[_ -]?limit/i.test(message) || /\brate\b/i.test(message);
+}
+
 function normalizeText(value: string) {
   return value
     .normalize("NFD")
@@ -1325,6 +1602,10 @@ function normalizeText(value: string) {
 
 function capitalize(value: string) {
   return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : value;
+}
+
+function shortenLabel(value: string, maxLength = 14) {
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1).trimEnd()}…`;
 }
 
 async function safeEditMessage(

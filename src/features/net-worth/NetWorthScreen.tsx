@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format, parseISO } from 'date-fns';
 import { pt } from 'date-fns/locale/pt';
 import {
@@ -11,111 +11,17 @@ import {
 } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
 import { formatCents } from '@/lib/utils';
+import { useNetWorthItems } from './useNetWorthItems';
 import { useNetWorthData } from './useNetWorthData';
-
-interface NetWorthFormRow {
-  id: string;
-  name: string;
-  value: string;
-  valueCents: number | null;
-}
-
-interface NetWorthSectionProps {
-  title: string;
-  rows: NetWorthFormRow[];
-  addLabel: string;
-  namePrefix: string;
-  onAddRow: () => void;
-  onRemoveRow: (id: string) => void;
-  onNameChange: (id: string, value: string) => void;
-  onValueChange: (id: string, value: string) => void;
-}
-
-interface ChartPoint {
-  month: string;
-  netWorth: number;
-}
+import type { NetWorthItem } from '@/types';
 
 const TOAST_HIDE_DELAY_MS = 3_000;
-
-function createEmptyRow(): NetWorthFormRow {
-  return {
-    id: crypto.randomUUID(),
-    name: '',
-    value: '',
-    valueCents: null,
-  };
-}
-
-function formatEditableEuro(cents: number | null): string {
-  if (cents === null) {
-    return '';
-  }
-
-  return new Intl.NumberFormat('pt-PT', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-    useGrouping: false,
-  }).format(cents / 100);
-}
 
 function parseEuroInput(value: string): number | null {
   const cleaned = value.replace(/\s|€/g, '').replace(',', '.');
   const num = Number.parseFloat(cleaned);
-
-  if (Number.isNaN(num)) {
-    return null;
-  }
-
+  if (Number.isNaN(num)) return null;
   return Math.round(num * 100);
-}
-
-function getFriendlyErrorMessage(error: unknown, fallbackMessage: string) {
-  return error instanceof Error && error.message ? error.message : fallbackMessage;
-}
-
-function mapRecordToRows(record: Record<string, number>): NetWorthFormRow[] {
-  const rows = Object.entries(record).map(([name, valueCents]) => ({
-    id: crypto.randomUUID(),
-    name,
-    value: formatEditableEuro(valueCents),
-    valueCents,
-  }));
-
-  return rows.length > 0 ? rows : [createEmptyRow()];
-}
-
-function buildRecordFromRows(
-  rows: NetWorthFormRow[],
-  label: 'ativos' | 'passivos'
-): Record<string, number> {
-  return rows.reduce<Record<string, number>>((record, row) => {
-    const name = row.name.trim();
-    const value = row.value.trim();
-
-    if (!name && !value) {
-      return record;
-    }
-
-    if (!name || row.valueCents === null) {
-      throw new Error(`Preencha o nome e o valor de todos os ${label}.`);
-    }
-
-    if (row.valueCents < 0) {
-      throw new Error('Introduza apenas valores positivos.');
-    }
-
-    if (name in record) {
-      throw new Error(`O nome “${name}” está repetido nos ${label}.`);
-    }
-
-    record[name] = row.valueCents;
-    return record;
-  }, {});
-}
-
-function sumRows(rows: NetWorthFormRow[]) {
-  return rows.reduce((total, row) => total + (row.valueCents ?? 0), 0);
 }
 
 function formatMonthLabel(month: string, pattern: 'LLL yy' | 'LLLL yyyy') {
@@ -123,249 +29,259 @@ function formatMonthLabel(month: string, pattern: 'LLL yy' | 'LLLL yyyy') {
   return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
 }
 
-function NetWorthSection({
-  title,
-  rows,
-  addLabel,
-  namePrefix,
-  onAddRow,
-  onRemoveRow,
-  onNameChange,
-  onValueChange,
-}: NetWorthSectionProps) {
+interface ItemRowProps {
+  item: NetWorthItem;
+  onUpdateValue: (id: string, cents: number) => void;
+  onRemove: (id: string) => void;
+}
+
+function ItemRow({ item, onUpdateValue, onRemove }: ItemRowProps) {
+  const [editValue, setEditValue] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+  const isSynced = item.source !== 'manual';
+
+  const handleBlur = () => {
+    setIsEditing(false);
+    const cents = parseEuroInput(editValue);
+    if (cents !== null && cents !== item.value_cents) {
+      onUpdateValue(item.id, cents);
+    }
+  };
+
+  const handleFocus = () => {
+    setIsEditing(true);
+    setEditValue(
+      item.value_cents > 0
+        ? (item.value_cents / 100).toFixed(2).replace('.', ',')
+        : ''
+    );
+  };
+
   return (
-    <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--color-divider)] pb-3">
-        <h2 className="text-base font-semibold text-[var(--color-text)]">{title}</h2>
+    <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 py-2">
+      <span className="text-lg">{item.emoji}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-[var(--color-text)] truncate">
+          {item.name}
+          {isSynced && (
+            <span className="ml-1 text-xs text-[var(--color-text-tertiary)]">🔗</span>
+          )}
+        </p>
+      </div>
+      {isSynced ? (
+        <span className="text-sm font-semibold text-[var(--color-text)] whitespace-nowrap">
+          {formatCents(item.value_cents)}
+        </span>
+      ) : (
+        <input
+          type="text"
+          inputMode="decimal"
+          value={isEditing ? editValue : formatCents(item.value_cents)}
+          onFocus={handleFocus}
+          onChange={(e) => setEditValue(e.target.value)}
+          onBlur={handleBlur}
+          className="w-28 min-h-[36px] rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-right text-sm text-[var(--color-text)] outline-none focus:border-[var(--color-accent)]"
+        />
+      )}
+      {!isSynced && (
         <button
           type="button"
-          onClick={onAddRow}
-          className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] px-3 py-2 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)]"
+          onClick={() => onRemove(item.id)}
+          className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-[var(--radius-sm)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          aria-label={`Remover ${item.name}`}
         >
-          {addLabel}
+          ×
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface AddItemFormProps {
+  type: 'asset' | 'liability';
+  onAdd: (name: string, emoji: string, valueCents: number) => void;
+}
+
+function AddItemForm({ type, onAdd }: AddItemFormProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [emoji, setEmoji] = useState(type === 'asset' ? '💰' : '💳');
+  const [value, setValue] = useState('');
+
+  const handleSubmit = () => {
+    const trimmed = name.trim();
+    const cents = parseEuroInput(value);
+    if (!trimmed || cents === null || cents < 0) return;
+    onAdd(trimmed, emoji, cents);
+    setName('');
+    setEmoji(type === 'asset' ? '💰' : '💳');
+    setValue('');
+    setIsOpen(false);
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setIsOpen(true)}
+        className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] px-4 py-3 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)]"
+      >
+        + {type === 'asset' ? 'Novo ativo' : 'Novo passivo'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg)] p-3">
+      <div className="grid grid-cols-[3rem_1fr] gap-2">
+        <input
+          type="text"
+          value={emoji}
+          onChange={(e) => setEmoji(e.target.value)}
+          maxLength={2}
+          className="min-h-[44px] rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-center text-lg outline-none focus:border-[var(--color-accent)]"
+        />
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={type === 'asset' ? 'Ex.: Conta poupança' : 'Ex.: Crédito habitação'}
+          className="min-h-[44px] rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 text-sm outline-none focus:border-[var(--color-accent)]"
+        />
+      </div>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="Valor (ex: 1500,00)"
+        className="min-h-[44px] rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-3 text-sm outline-none focus:border-[var(--color-accent)]"
+      />
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={handleSubmit}
+          className="flex-1 min-h-[44px] rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-text-inverse)] transition-colors hover:bg-[var(--color-accent-hover)]"
+        >
+          Adicionar
+        </button>
+        <button
+          type="button"
+          onClick={() => setIsOpen(false)}
+          className="min-h-[44px] rounded-[var(--radius-md)] border border-[var(--color-border)] px-4 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)]"
+        >
+          Cancelar
         </button>
       </div>
-
-      <div className="mt-4 flex flex-col gap-3">
-        {rows.map((row) => (
-          <div
-            key={row.id}
-            className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-end"
-          >
-            <div>
-              <label
-                htmlFor={`${namePrefix}-name-${row.id}`}
-                className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]"
-              >
-                Nome
-              </label>
-              <input
-                id={`${namePrefix}-name-${row.id}`}
-                type="text"
-                value={row.name}
-                onChange={(event) => onNameChange(row.id, event.target.value)}
-                placeholder="Ex.: Conta à ordem"
-                className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor={`${namePrefix}-value-${row.id}`}
-                className="mb-1 block text-xs font-medium text-[var(--color-text-secondary)]"
-              >
-                Valor
-              </label>
-              <input
-                id={`${namePrefix}-value-${row.id}`}
-                type="text"
-                inputMode="decimal"
-                value={row.value}
-                onChange={(event) => onValueChange(row.id, event.target.value)}
-                placeholder="0,00"
-                className="min-h-[44px] w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)]"
-              />
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onRemoveRow(row.id)}
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] text-lg text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-hover)]"
-              aria-label={`Remover ${title.toLowerCase().slice(0, -1)}`}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-      </div>
-    </section>
+    </div>
   );
 }
 
 export function NetWorthScreen() {
   const { user } = useAuth();
   const {
-    entries,
-    currentEntry,
+    assets,
+    liabilities,
+    totalAssets,
+    totalLiabilities,
+    netWorth,
     isLoading,
-    error,
-    monthLabel,
-    goToPreviousMonth,
-    goToNextMonth,
-    saveEntry,
-    copyFromLastMonth,
-    deleteEntry,
-  } = useNetWorthData(user?.id);
+    addItem,
+    updateItem,
+    removeItem,
+    takeSnapshot,
+  } = useNetWorthItems(user?.id);
 
-  const [assetRows, setAssetRows] = useState<NetWorthFormRow[]>([createEmptyRow()]);
-  const [liabilityRows, setLiabilityRows] = useState<NetWorthFormRow[]>([createEmptyRow()]);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const { entries, isLoading: isHistoryLoading } = useNetWorthData(user?.id);
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    if (!toastMessage) {
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setToastMessage(null);
-    }, TOAST_HIDE_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
+    if (!toastMessage) return;
+    const id = window.setTimeout(() => setToastMessage(null), TOAST_HIDE_DELAY_MS);
+    return () => window.clearTimeout(id);
   }, [toastMessage]);
 
-  useEffect(() => {
-    setAssetRows(mapRecordToRows(currentEntry?.assets_json ?? {}));
-    setLiabilityRows(mapRecordToRows(currentEntry?.liabilities_json ?? {}));
-    setActionError(null);
-  }, [currentEntry]);
-
-  const chartData = useMemo<ChartPoint[]>(() => {
+  const chartData = useMemo(() => {
     return [...entries]
-      .sort((left, right) => left.month.localeCompare(right.month))
+      .sort((a, b) => a.month.localeCompare(b.month))
       .map((entry) => ({
         month: entry.month,
         netWorth:
-          Object.values(entry.assets_json).reduce((total, value) => total + value, 0) -
-          Object.values(entry.liabilities_json).reduce((total, value) => total + value, 0),
+          Object.values(entry.assets_json).reduce((t, v) => t + v, 0) -
+          Object.values(entry.liabilities_json).reduce((t, v) => t + v, 0),
       }));
   }, [entries]);
 
-  const totalAssets = useMemo(() => sumRows(assetRows), [assetRows]);
-  const totalLiabilities = useMemo(() => sumRows(liabilityRows), [liabilityRows]);
-  const netWorth = totalAssets - totalLiabilities;
-  const messages = [error, actionError].filter(
-    (message): message is string => Boolean(message)
+  const handleUpdateValue = useCallback(
+    async (id: string, cents: number) => {
+      try {
+        await updateItem(id, { value_cents: cents });
+      } catch (err) {
+        setErrorMessage('Não foi possível atualizar o valor.');
+        console.error(err);
+      }
+    },
+    [updateItem]
   );
 
-  const updateRows = (
-    rows: NetWorthFormRow[],
-    id: string,
-    updates: Partial<NetWorthFormRow>
-  ) => rows.map((row) => (row.id === id ? { ...row, ...updates } : row));
+  const handleRemove = useCallback(
+    async (id: string) => {
+      if (!window.confirm('Remover este item do patrimônio?')) return;
+      try {
+        await removeItem(id);
+        setToastMessage('Item removido.');
+      } catch (err) {
+        setErrorMessage('Não foi possível remover o item.');
+        console.error(err);
+      }
+    },
+    [removeItem]
+  );
 
-  const handleAssetNameChange = (id: string, value: string) => {
-    setActionError(null);
-    setAssetRows((currentRows) => updateRows(currentRows, id, { name: value }));
-  };
+  const handleAddItem = useCallback(
+    async (type: 'asset' | 'liability', name: string, emoji: string, valueCents: number) => {
+      try {
+        await addItem({
+          name,
+          type,
+          value_cents: valueCents,
+          source: 'manual',
+          source_id: null,
+          emoji,
+          sort_order: type === 'asset' ? assets.length : liabilities.length,
+        });
+        setToastMessage('Item adicionado.');
+      } catch (err) {
+        setErrorMessage('Não foi possível adicionar o item.');
+        console.error(err);
+      }
+    },
+    [addItem, assets.length, liabilities.length]
+  );
 
-  const handleAssetValueChange = (id: string, value: string) => {
-    setActionError(null);
-    setAssetRows((currentRows) =>
-      updateRows(currentRows, id, {
-        value: value.replace(/[^\d,.\s€-]/g, ''),
-        valueCents: parseEuroInput(value),
-      })
-    );
-  };
-
-  const handleLiabilityNameChange = (id: string, value: string) => {
-    setActionError(null);
-    setLiabilityRows((currentRows) => updateRows(currentRows, id, { name: value }));
-  };
-
-  const handleLiabilityValueChange = (id: string, value: string) => {
-    setActionError(null);
-    setLiabilityRows((currentRows) =>
-      updateRows(currentRows, id, {
-        value: value.replace(/[^\d,.\s€-]/g, ''),
-        valueCents: parseEuroInput(value),
-      })
-    );
-  };
-
-  const handleSave = async () => {
-    setActionError(null);
-    setToastMessage(null);
+  const handleSnapshot = useCallback(async () => {
     setIsSaving(true);
-
     try {
-      const assets = buildRecordFromRows(assetRows, 'ativos');
-      const liabilities = buildRecordFromRows(liabilityRows, 'passivos');
-      await saveEntry(assets, liabilities);
-      setToastMessage('Património líquido guardado.');
-    } catch (saveError) {
-      console.error('Erro ao guardar património líquido:', saveError);
-      setActionError(
-        getFriendlyErrorMessage(saveError, 'Não foi possível guardar o património líquido.')
-      );
+      await takeSnapshot();
+      setToastMessage('📸 Snapshot guardado para o histórico.');
+    } catch (err) {
+      setErrorMessage('Não foi possível guardar o snapshot.');
+      console.error(err);
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [takeSnapshot]);
 
-  const handleCopyFromLastMonth = () => {
-    setActionError(null);
-    setToastMessage(null);
-
-    const previousData = copyFromLastMonth();
-
-    if (!previousData) {
-      setActionError('Não existem dados no mês anterior para copiar.');
-      return;
-    }
-
-    setAssetRows(mapRecordToRows(previousData.assets));
-    setLiabilityRows(mapRecordToRows(previousData.liabilities));
-    setToastMessage('Dados copiados do mês anterior.');
-  };
-
-  const handleDelete = async () => {
-    if (!currentEntry) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      `Tem a certeza que quer eliminar a entrada de ${monthLabel.toLowerCase()}?`
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[300px] items-center justify-center text-sm text-[var(--color-text-secondary)]">
+        A carregar patrimônio…
+      </div>
     );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setActionError(null);
-    setToastMessage(null);
-    setIsDeleting(true);
-
-    try {
-      await deleteEntry();
-      setToastMessage('Entrada eliminada.');
-    } catch (deleteError) {
-      console.error('Erro ao eliminar entrada de património líquido:', deleteError);
-      setActionError(
-        getFriendlyErrorMessage(
-          deleteError,
-          'Não foi possível eliminar a entrada de património líquido.'
-        )
-      );
-    } finally {
-      setIsDeleting(false);
-    }
-  };
+  }
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-6xl flex-col gap-4 bg-[var(--color-bg-secondary)] p-4 sm:p-6">
@@ -374,82 +290,105 @@ export function NetWorthScreen() {
           Património Líquido
         </h1>
         <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-          Registe mensalmente os seus ativos e passivos.
+          Os seus ativos e passivos — atualizados em tempo real.
         </p>
       </header>
 
       {toastMessage && (
-        <div
-          className="rounded-[var(--radius-md)] border border-[var(--color-success)] bg-[var(--color-accent-light)] px-4 py-3 text-sm font-medium text-[var(--color-accent)]"
-          aria-live="polite"
-        >
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-success)] bg-[var(--color-accent-light)] px-4 py-3 text-sm font-medium text-[var(--color-accent)]" aria-live="polite">
           {toastMessage}
         </div>
       )}
 
-      {messages.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {messages.map((message) => (
-            <p
-              key={message}
-              className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-danger)]"
-            >
-              {message}
-            </p>
-          ))}
+      {errorMessage && (
+        <div className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg)] px-4 py-3 text-sm text-[var(--color-danger)]">
+          {errorMessage}
+          <button type="button" onClick={() => setErrorMessage(null)} className="ml-2 underline">fechar</button>
         </div>
       )}
 
-      <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      {/* Summary Card */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+        <div className="grid grid-cols-3 gap-4 text-center">
           <div>
-            <h2 className="text-base font-semibold text-[var(--color-text)]">Mês</h2>
-            <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-              Navegue entre os seus registos mensais.
-            </p>
+            <p className="text-xs font-medium text-[var(--color-text-secondary)]">Ativos</p>
+            <p className="mt-1 text-lg font-semibold text-[var(--color-success)]">{formatCents(totalAssets)}</p>
           </div>
-
-          <div className="flex items-center gap-2 rounded-[var(--radius-md)] bg-[var(--color-bg-secondary)] p-1">
-            <button
-              type="button"
-              onClick={goToPreviousMonth}
-              disabled={isSaving || isDeleting}
-              aria-label="Ver mês anterior"
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] border border-transparent text-lg text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-40"
-            >
-              ←
-            </button>
-            <p className="min-w-[8.5rem] text-center text-sm font-semibold text-[var(--color-text)]">
-              {monthLabel}
+          <div>
+            <p className="text-xs font-medium text-[var(--color-text-secondary)]">Passivos</p>
+            <p className="mt-1 text-lg font-semibold text-[var(--color-danger)]">{formatCents(totalLiabilities)}</p>
+          </div>
+          <div>
+            <p className="text-xs font-medium text-[var(--color-text-secondary)]">Líquido</p>
+            <p className={`mt-1 text-lg font-bold ${netWorth >= 0 ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>
+              {formatCents(netWorth)}
             </p>
-            <button
-              type="button"
-              onClick={goToNextMonth}
-              disabled={isSaving || isDeleting}
-              aria-label="Ver mês seguinte"
-              className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] border border-transparent text-lg text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg)] disabled:opacity-40"
-            >
-              →
-            </button>
           </div>
         </div>
       </section>
 
-      <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+      {/* Assets */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+        <h2 className="text-base font-semibold text-[var(--color-text)] border-b border-[var(--color-divider)] pb-3">
+          📈 Ativos
+        </h2>
+        <div className="mt-3 flex flex-col gap-2">
+          {assets.length === 0 && (
+            <p className="text-sm text-[var(--color-text-secondary)] py-3">
+              Nenhum ativo registado. Adicione o primeiro abaixo.
+            </p>
+          )}
+          {assets.map((item) => (
+            <ItemRow key={item.id} item={item} onUpdateValue={handleUpdateValue} onRemove={handleRemove} />
+          ))}
+          <AddItemForm type="asset" onAdd={(name, emoji, v) => handleAddItem('asset', name, emoji, v)} />
+        </div>
+      </section>
+
+      {/* Liabilities */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+        <h2 className="text-base font-semibold text-[var(--color-text)] border-b border-[var(--color-divider)] pb-3">
+          📉 Passivos
+        </h2>
+        <div className="mt-3 flex flex-col gap-2">
+          {liabilities.length === 0 && (
+            <p className="text-sm text-[var(--color-text-secondary)] py-3">
+              Nenhum passivo registado.
+            </p>
+          )}
+          {liabilities.map((item) => (
+            <ItemRow key={item.id} item={item} onUpdateValue={handleUpdateValue} onRemove={handleRemove} />
+          ))}
+          <AddItemForm type="liability" onAdd={(name, emoji, v) => handleAddItem('liability', name, emoji, v)} />
+        </div>
+      </section>
+
+      {/* Snapshot Button */}
+      <button
+        type="button"
+        onClick={handleSnapshot}
+        disabled={isSaving || (assets.length === 0 && liabilities.length === 0)}
+        className="flex min-h-[44px] items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--color-accent)] px-4 py-3 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)] disabled:opacity-40"
+      >
+        📸 Guardar snapshot mensal
+      </button>
+
+      {/* Historical Chart */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
         <div className="border-b border-[var(--color-divider)] pb-3">
           <h2 className="text-base font-semibold text-[var(--color-text)]">Evolução</h2>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            Acompanhe a evolução mensal do seu património líquido.
+            Histórico mensal do seu patrimônio líquido.
           </p>
         </div>
 
-        {isLoading ? (
+        {isHistoryLoading ? (
           <div className="flex min-h-[200px] items-center justify-center text-sm text-[var(--color-text-secondary)]">
-            A carregar património líquido…
+            A carregar histórico…
           </div>
         ) : chartData.length < 2 ? (
           <div className="mt-4 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-6 text-sm text-[var(--color-text-secondary)]">
-            Adicione dados de pelo menos 2 meses para ver o gráfico.
+            Guarde snapshots em pelo menos 2 meses para ver o gráfico.
           </div>
         ) : (
           <div className="mt-4 h-[200px] w-full">
@@ -457,21 +396,21 @@ export function NetWorthScreen() {
               <LineChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                 <XAxis
                   dataKey="month"
-                  tickFormatter={(value: string) => formatMonthLabel(value, 'LLL yy')}
+                  tickFormatter={(v: string) => formatMonthLabel(v, 'LLL yy')}
                   tick={{ fontSize: 10, fill: 'var(--color-text-secondary)' }}
                   axisLine={{ stroke: 'var(--color-border)' }}
                   tickLine={{ stroke: 'var(--color-border)' }}
                 />
                 <YAxis
-                  tickFormatter={(value: number) => formatCents(value)}
+                  tickFormatter={(v: number) => formatCents(v)}
                   tick={{ fontSize: 10, fill: 'var(--color-text-secondary)' }}
                   axisLine={{ stroke: 'var(--color-border)' }}
                   tickLine={{ stroke: 'var(--color-border)' }}
                   width={80}
                 />
                 <Tooltip
-                  formatter={(value: number | string) => formatCents(Number(value))}
-                  labelFormatter={(label) => formatMonthLabel(String(label), 'LLLL yyyy')}
+                  formatter={(v: number | string) => formatCents(Number(v))}
+                  labelFormatter={(l) => formatMonthLabel(String(l), 'LLLL yyyy')}
                   contentStyle={{
                     borderColor: 'var(--color-border)',
                     borderRadius: '8px',
@@ -479,130 +418,11 @@ export function NetWorthScreen() {
                     color: 'var(--color-text)',
                   }}
                 />
-                <Line
-                  type="monotone"
-                  dataKey="netWorth"
-                  stroke="var(--color-accent)"
-                  strokeWidth={2}
-                  dot={{ r: 4 }}
-                />
+                <Line type="monotone" dataKey="netWorth" stroke="var(--color-accent)" strokeWidth={2} dot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         )}
-      </section>
-
-      <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-        <div className="border-b border-[var(--color-divider)] pb-3">
-          <h2 className="text-base font-semibold text-[var(--color-text)]">
-            Resumo do mês atual
-          </h2>
-          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            Totais calculados para {monthLabel.toLowerCase()}.
-          </p>
-        </div>
-
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-              Ativos
-            </p>
-            <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">
-              {formatCents(totalAssets)}
-            </p>
-          </div>
-          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-              Passivos
-            </p>
-            <p className="mt-2 text-lg font-semibold text-[var(--color-text)]">
-              {formatCents(totalLiabilities)}
-            </p>
-          </div>
-          <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-secondary)] p-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-[var(--color-text-secondary)]">
-              Património líquido
-            </p>
-            <p
-              className={`mt-2 text-lg font-semibold ${
-                netWorth >= 0
-                  ? 'text-[var(--color-success)]'
-                  : 'text-[var(--color-danger)]'
-              }`}
-            >
-              {formatCents(netWorth)}
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <NetWorthSection
-        title="Ativos"
-        rows={assetRows}
-        addLabel="Adicionar ativo"
-        namePrefix="asset"
-        onAddRow={() => {
-          setActionError(null);
-          setAssetRows((currentRows) => [...currentRows, createEmptyRow()]);
-        }}
-        onRemoveRow={(id) => {
-          setActionError(null);
-          setAssetRows((currentRows) => currentRows.filter((row) => row.id !== id));
-        }}
-        onNameChange={handleAssetNameChange}
-        onValueChange={handleAssetValueChange}
-      />
-
-      <NetWorthSection
-        title="Passivos"
-        rows={liabilityRows}
-        addLabel="Adicionar passivo"
-        namePrefix="liability"
-        onAddRow={() => {
-          setActionError(null);
-          setLiabilityRows((currentRows) => [...currentRows, createEmptyRow()]);
-        }}
-        onRemoveRow={(id) => {
-          setActionError(null);
-          setLiabilityRows((currentRows) => currentRows.filter((row) => row.id !== id));
-        }}
-        onNameChange={handleLiabilityNameChange}
-        onValueChange={handleLiabilityValueChange}
-      />
-
-      <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              void handleSave();
-            }}
-            disabled={isSaving || isDeleting}
-            className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-40"
-          >
-            {isSaving ? 'A guardar…' : 'Guardar'}
-          </button>
-          <button
-            type="button"
-            onClick={handleCopyFromLastMonth}
-            disabled={isSaving || isDeleting}
-            className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)] disabled:opacity-40"
-          >
-            Copiar do mês anterior
-          </button>
-          {currentEntry && (
-            <button
-              type="button"
-              onClick={() => {
-                void handleDelete();
-              }}
-              disabled={isSaving || isDeleting}
-              className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-danger)] px-4 py-2.5 text-sm font-medium text-[var(--color-danger)] transition-colors hover:bg-red-50 disabled:opacity-40"
-            >
-              {isDeleting ? 'A eliminar…' : 'Eliminar entrada'}
-            </button>
-          )}
-        </div>
       </section>
     </div>
   );

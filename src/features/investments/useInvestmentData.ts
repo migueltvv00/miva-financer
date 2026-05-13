@@ -355,6 +355,37 @@ export function useInvestmentData(
               !(snapshot.account_id === accountId && snapshot.month === optimisticSnapshot.month)
           )
         );
+
+        // Sync to net_worth_items
+        try {
+          const account = accounts.find((a) => a.id === accountId);
+          const { data: nwItem } = await supabase
+            .from('net_worth_items')
+            .select('id')
+            .eq('user_id', userId)
+            .eq('source', 'investment')
+            .eq('source_id', accountId)
+            .maybeSingle();
+
+          if (nwItem) {
+            await supabase
+              .from('net_worth_items')
+              .update({ value_cents: valueCents, updated_at: new Date().toISOString() })
+              .eq('id', nwItem.id);
+          } else {
+            await supabase.from('net_worth_items').insert({
+              user_id: userId,
+              name: account?.name ?? 'Investimento',
+              type: 'asset',
+              value_cents: valueCents,
+              source: 'investment',
+              source_id: accountId,
+              emoji: '📈',
+            });
+          }
+        } catch {
+          // Non-critical
+        }
       } catch (saveSnapshotError) {
         console.error('Erro ao guardar registo de investimento:', saveSnapshotError);
         setStoredSnapshots(previousSnapshots);

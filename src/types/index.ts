@@ -111,6 +111,28 @@ export interface NetWorthEntry {
   created_at: string;
 }
 
+export interface NetWorthItem {
+  id: string;
+  user_id: string;
+  name: string;
+  type: 'asset' | 'liability';
+  value_cents: number;
+  source: 'manual' | 'savings_goal' | 'investment';
+  source_id: string | null;
+  emoji: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MealCardBudget {
+  id: string;
+  user_id: string;
+  month: string;
+  allowance_cents: number;
+  created_at: string;
+}
+
 export interface ImportSession {
   id: string;
   user_id: string;

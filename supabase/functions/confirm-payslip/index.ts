@@ -317,6 +317,40 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // Upsert meal card budget if meal_card_cents > 0
+  if (payslip.meal_card_cents && payslip.meal_card_cents > 0) {
+    try {
+      const { data: existingMcBudget } = await supabase
+        .from("meal_card_budgets")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("month", monthDate)
+        .maybeSingle();
+
+      if (existingMcBudget) {
+        await supabase
+          .from("meal_card_budgets")
+          .update({ allowance_cents: payslip.meal_card_cents })
+          .eq("id", existingMcBudget.id);
+      } else {
+        await supabase.from("meal_card_budgets").insert({
+          user_id: userId,
+          month: monthDate,
+          allowance_cents: payslip.meal_card_cents,
+        });
+      }
+
+      log("confirm", "meal_card_budget_upserted", userId, {
+        month: monthDate,
+        allowance_cents: payslip.meal_card_cents,
+      });
+    } catch (mcError) {
+      log("confirm", "meal_card_budget_error", userId, {
+        error: String(mcError),
+      });
+    }
+  }
+
   log("confirm", "success", userId, {
     transaction_count: createdTx?.length ?? 0,
     payslip_import_id: payslip.id,

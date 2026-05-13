@@ -24,77 +24,72 @@ export function MealCardWidget({ userId }: MealCardWidgetProps) {
     async function load() {
       try {
         const now = new Date();
-        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+        const nextMonthKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
 
-        const { data: payslip, error: payslipError } = await supabase
-          .from('payslip_imports')
-          .select('meal_card_cents')
+        // Prefer meal_card_budgets, fallback to payslip_imports
+        const { data: budgetRow } = await supabase
+          .from('meal_card_budgets')
+          .select('allowance_cents')
           .eq('user_id', userId)
-          .eq('month', currentMonth)
-          .eq('status', 'done')
-          .order('created_at', { ascending: false })
-          .limit(1)
+          .eq('month', monthKey)
           .maybeSingle();
 
-        if (payslipError) {
-          throw payslipError;
+        let allowance = budgetRow?.allowance_cents ?? null;
+
+        if (!allowance) {
+          const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+          const { data: payslip } = await supabase
+            .from('payslip_imports')
+            .select('meal_card_cents')
+            .eq('user_id', userId)
+            .eq('month', currentMonth)
+            .eq('status', 'done')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          allowance = payslip?.meal_card_cents ?? null;
         }
 
-        if (!isActive) {
-          return;
-        }
+        if (!isActive) return;
 
-        if (!payslip?.meal_card_cents || payslip.meal_card_cents <= 0) {
+        if (!allowance || allowance <= 0) {
           setCredit(null);
           setSpent(0);
           setIsLoading(false);
           return;
         }
 
-        setCredit(payslip.meal_card_cents);
+        setCredit(allowance);
 
-        const monthStart = `${currentMonth}-01`;
-        const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-        const monthEnd = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}-01`;
-
-        const { data: txns, error: transactionsError } = await supabase
+        const { data: txns, error: txError } = await supabase
           .from('transactions')
           .select('amount_cents')
           .eq('user_id', userId)
           .eq('payment_method', 'cartao_refeicao')
           .eq('type', 'expense')
-          .gte('date', monthStart)
-          .lt('date', monthEnd);
+          .gte('date', monthKey)
+          .lt('date', nextMonthKey);
 
-        if (transactionsError) {
-          throw transactionsError;
-        }
+        if (txError) throw txError;
+        if (!isActive) return;
 
-        if (!isActive) {
-          return;
-        }
-
-        const totalSpent = (txns ?? []).reduce((sum, transaction) => sum + (transaction.amount_cents ?? 0), 0);
+        const totalSpent = (txns ?? []).reduce((sum, tx) => sum + (tx.amount_cents ?? 0), 0);
         setSpent(totalSpent);
       } catch (error) {
         console.error('Erro ao carregar cartão refeição:', error);
-        if (!isActive) {
-          return;
-        }
+        if (!isActive) return;
         setCredit(null);
         setSpent(0);
       } finally {
-        if (isActive) {
-          setIsLoading(false);
-        }
+        if (isActive) setIsLoading(false);
       }
     }
 
     void load();
-
-    return () => {
-      isActive = false;
-    };
+    return () => { isActive = false; };
   }, [userId]);
 
   if (isLoading || credit === null || credit <= 0) {
