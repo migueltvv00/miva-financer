@@ -10,6 +10,7 @@ import {
 import { IncomeSourceList } from '@/features/income-sources/IncomeSourceList';
 import { InstalmentList } from '@/features/instalments/InstalmentList';
 import { PlanningScreen } from '@/features/planning/PlanningScreen';
+import { TelegramSettings } from '@/features/settings/TelegramSettings';
 import { useAuth } from '@/hooks/useAuth';
 
 function formatImportSessionDate(dateValue: string) {
@@ -182,6 +183,14 @@ export function SettingsScreen() {
             )}
           </div>
         </section>
+
+        <div className="border-t border-[var(--color-divider)] pt-2">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+            Integrações
+          </h3>
+        </div>
+
+        <TelegramSettings userId={user?.id} />
 
         <button
           onClick={handleSignOut}

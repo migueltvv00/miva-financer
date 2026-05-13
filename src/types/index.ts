@@ -121,3 +121,23 @@ export interface InvestmentSnapshot {
   cost_basis_cents: number;
   created_at: string;
 }
+
+export interface TelegramSession {
+  id: string;
+  user_id: string;
+  telegram_chat_id: number;
+  telegram_username: string | null;
+  is_authorized: boolean;
+  digest_enabled: boolean;
+  linked_at: string | null;
+  created_at: string;
+}
+
+export interface TelegramPin {
+  id: string;
+  user_id: string;
+  pin: string;
+  expires_at: string;
+  used: boolean;
+  created_at: string;
+}
