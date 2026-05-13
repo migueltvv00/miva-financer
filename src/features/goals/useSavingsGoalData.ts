@@ -52,7 +52,7 @@ export function useSavingsGoalData(
     }
 
     const loadGoals = async () => {
-      setLoading(true);
+      if (useSavingsGoalStore.getState().goals.length === 0) setLoading(true);
       setError(null);
 
       try {
@@ -192,7 +192,20 @@ export function useSavingsGoalData(
           throw insertError;
         }
 
-        updateGoalInStore(optimisticGoal.id, data as SavingsGoal);
+        const createdGoal = data as SavingsGoal;
+        updateGoalInStore(optimisticGoal.id, createdGoal);
+
+        try {
+          await supabase.from('net_worth_items').insert({
+            user_id: userId,
+            name: values.name,
+            type: 'asset',
+            value_cents: 0,
+            source: 'savings_goal',
+            source_id: createdGoal.id,
+            emoji: values.emoji,
+          });
+        } catch {}
       } catch (err) {
         console.error('Erro ao criar objetivo de poupança:', err);
         setGoals(previousGoals);
@@ -242,6 +255,19 @@ export function useSavingsGoalData(
         if (updateError) {
           throw updateError;
         }
+
+        try {
+          await supabase
+            .from('net_worth_items')
+            .update({
+              name: values.name,
+              emoji: values.emoji,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId)
+            .eq('source', 'savings_goal')
+            .eq('source_id', id);
+        } catch {}
       } catch (err) {
         console.error('Erro ao atualizar objetivo de poupança:', err);
         setGoals(previousGoals);
@@ -275,6 +301,15 @@ export function useSavingsGoalData(
         if (deleteError) {
           throw deleteError;
         }
+
+        try {
+          await supabase
+            .from('net_worth_items')
+            .delete()
+            .eq('user_id', userId)
+            .eq('source', 'savings_goal')
+            .eq('source_id', id);
+        } catch {}
       } catch (err) {
         console.error('Erro ao eliminar objetivo de poupança:', err);
         setGoals(previousGoals);

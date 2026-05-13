@@ -1080,3 +1080,4 @@ export function TransactionListScreen() {
     </div>
   );
 }
+export default TransactionListScreen;

@@ -53,7 +53,7 @@ export function useIncomeSourceData(
     }
 
     const loadSources = async () => {
-      setLoading(true);
+      if (useIncomeSourceStore.getState().sources.length === 0) setLoading(true);
       setError(null);
 
       try {

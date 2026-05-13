@@ -73,7 +73,7 @@ export function useNetWorthData(
     }
 
     const loadEntries = async () => {
-      setLoading(true);
+      if (useNetWorthStore.getState().entries.length === 0) setLoading(true);
       setError(null);
 
       try {

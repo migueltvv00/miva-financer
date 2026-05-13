@@ -192,3 +192,4 @@ export function TrendsScreen() {
     </div>
   );
 }
+export default TrendsScreen;

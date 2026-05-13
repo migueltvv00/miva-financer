@@ -906,3 +906,4 @@ export function InvestmentScreen() {
     </div>
   );
 }
+export default InvestmentScreen;

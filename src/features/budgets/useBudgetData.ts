@@ -58,7 +58,9 @@ export function useBudgetData(
     }
 
     const loadBudgets = async () => {
-      setLoading(true);
+      // Only show loading spinner on first load (no cached data)
+      const store = useBudgetStore.getState();
+      if (store.budgets.length === 0) setLoading(true);
       setError(null);
 
       try {

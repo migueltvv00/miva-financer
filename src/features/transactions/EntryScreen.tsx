@@ -695,3 +695,4 @@ export function EntryScreen() {
     </div>
   );
 }
+export default EntryScreen;

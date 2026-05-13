@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
+import { LoadingState } from '@/components/LoadingState';
+import { EmptyState } from '@/components/EmptyState';
 
 interface BudgetScreenProps {
   userId: string | null | undefined;
@@ -283,13 +285,9 @@ export function BudgetScreen({
       )}
 
       {isLoading || isCategoryLoading ? (
-        <div className="flex min-h-[160px] items-center justify-center text-sm text-[var(--color-text-secondary)]">
-          A carregar orçamentos…
-        </div>
+        <LoadingState message="A carregar orçamentos…" />
       ) : expenseCategories.length === 0 ? (
-        <div className="mt-4 rounded-[var(--radius-md)] border border-dashed border-[var(--color-border)] bg-[var(--color-bg-secondary)] px-4 py-6 text-sm text-[var(--color-text-secondary)]">
-          Ainda não tem categorias de despesa para definir limites.
-        </div>
+        <EmptyState emoji="📋" message="Ainda não tem categorias de despesa para definir limites." />
       ) : (
         <ul className="mt-4 flex flex-col gap-3">
           {expenseCategories.map((category) => {

@@ -1,94 +1,65 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { AppLayout } from '@/components/AppLayout';
 import { AuthScreen } from '@/features/auth/AuthScreen';
-import { EntryScreen } from '@/features/transactions/EntryScreen';
-import { TransactionListScreen } from '@/features/transactions/TransactionListScreen';
-import { DashboardScreen } from '@/features/dashboard/DashboardScreen';
-import { GoalsScreen } from '@/features/goals/GoalsScreen';
-import { InvestmentScreen } from '@/features/investments/InvestmentScreen';
-import { NetWorthScreen } from '@/features/net-worth/NetWorthScreen';
-import { SettingsScreen } from '@/features/settings/SettingsScreen';
-import { ImportScreen } from '@/features/import/ImportScreen';
-import { TrendsScreen } from '@/features/trends/TrendsScreen';
+import { ScreenSkeleton } from '@/components/ScreenSkeleton';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
+
+// Lazy-loaded route screens
+const EntryScreen = lazy(() => import('@/features/transactions/EntryScreen'));
+const TransactionListScreen = lazy(() => import('@/features/transactions/TransactionListScreen'));
+const DashboardScreen = lazy(() => import('@/features/dashboard/DashboardScreen'));
+const GoalsScreen = lazy(() => import('@/features/goals/GoalsScreen'));
+const InvestmentScreen = lazy(() => import('@/features/investments/InvestmentScreen'));
+const NetWorthScreen = lazy(() => import('@/features/net-worth/NetWorthScreen'));
+const SettingsScreen = lazy(() => import('@/features/settings/SettingsScreen'));
+const ImportScreen = lazy(() => import('@/features/import/ImportScreen'));
+const TrendsScreen = lazy(() => import('@/features/trends/TrendsScreen'));
 
 function AuthLoadingScreen() {
   return (
     <div className="flex h-full items-center justify-center">
-      <div className="text-[var(--color-text-secondary)]">A carregar…</div>
+      <div className="h-8 w-8 animate-spin rounded-full border-3 border-[var(--color-bg-tertiary)] border-t-[var(--color-accent)]" />
     </div>
   );
-}
-
-function useLoadingTimeout(isLoading: boolean, timeoutMs = 5000) {
-  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (!isLoading) {
-      setLoadingTimedOut(false);
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setLoadingTimedOut(true);
-    }, timeoutMs);
-
-    return () => window.clearTimeout(timer);
-  }, [isLoading, timeoutMs]);
-
-  return loadingTimedOut;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const processedUserIdRef = useRef<string | null>(null);
-  const loadingTimedOut = useLoadingTimeout(isLoading);
 
   const userId = user?.id ?? null;
 
   useEffect(() => {
-    if (!userId) {
-      processedUserIdRef.current = null;
-      return;
-    }
-
-    if (processedUserIdRef.current === userId) {
-      return;
-    }
-
+    if (!userId || processedUserIdRef.current === userId) return;
     processedUserIdRef.current = userId;
-
     void processRecurringTransactions(userId).catch((error) => {
       console.error('Erro ao processar transações recorrentes:', error);
     });
   }, [userId]);
 
-  if (isLoading && !loadingTimedOut) {
-    return <AuthLoadingScreen />;
-  }
-
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-
+  if (isLoading) return <AuthLoadingScreen />;
+  if (!user) return <Navigate to="/login" replace />;
   return <>{children}</>;
 }
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
-  const loadingTimedOut = useLoadingTimeout(isLoading);
-
-  if (isLoading && !loadingTimedOut) {
-    return <AuthLoadingScreen />;
-  }
-
-  if (user) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (isLoading) return <AuthLoadingScreen />;
+  if (user) return <Navigate to="/" replace />;
   return <>{children}</>;
+}
+
+function LazyRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <ErrorBoundary>
+      <Suspense fallback={<ScreenSkeleton />}>
+        {children}
+      </Suspense>
+    </ErrorBoundary>
+  );
 }
 
 export function App() {
@@ -111,15 +82,15 @@ export function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<EntryScreen />} />
-            <Route path="transacoes" element={<TransactionListScreen />} />
-            <Route path="resumo" element={<DashboardScreen />} />
-            <Route path="tendencias" element={<TrendsScreen />} />
-            <Route path="objetivos" element={<GoalsScreen />} />
-            <Route path="patrimonio" element={<NetWorthScreen />} />
-            <Route path="investimentos" element={<InvestmentScreen />} />
-            <Route path="importar" element={<ImportScreen />} />
-            <Route path="definicoes" element={<SettingsScreen />} />
+            <Route index element={<LazyRoute><EntryScreen /></LazyRoute>} />
+            <Route path="transacoes" element={<LazyRoute><TransactionListScreen /></LazyRoute>} />
+            <Route path="resumo" element={<LazyRoute><DashboardScreen /></LazyRoute>} />
+            <Route path="tendencias" element={<LazyRoute><TrendsScreen /></LazyRoute>} />
+            <Route path="objetivos" element={<LazyRoute><GoalsScreen /></LazyRoute>} />
+            <Route path="patrimonio" element={<LazyRoute><NetWorthScreen /></LazyRoute>} />
+            <Route path="investimentos" element={<LazyRoute><InvestmentScreen /></LazyRoute>} />
+            <Route path="importar" element={<LazyRoute><ImportScreen /></LazyRoute>} />
+            <Route path="definicoes" element={<LazyRoute><SettingsScreen /></LazyRoute>} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -66,7 +66,7 @@ export function useInstalmentData(
     }
 
     const loadInstalments = async () => {
-      setLoading(true);
+      if (useInstalmentStore.getState().instalments.length === 0) setLoading(true);
       setError(null);
 
       try {

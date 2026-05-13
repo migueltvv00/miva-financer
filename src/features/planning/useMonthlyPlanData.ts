@@ -73,7 +73,7 @@ export function useMonthlyPlanData(
     }
 
     const loadPlan = async () => {
-      setLoading(true);
+      if (!useMonthlyPlanStore.getState().plan) setLoading(true);
       setError(null);
 
       try {

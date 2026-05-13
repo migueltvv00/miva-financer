@@ -25,7 +25,8 @@ export function useCategoryData(
     }
 
     const loadCategories = async () => {
-      setLoading(true);
+      // Only show loading on first load
+      if (useCategoryStore.getState().categories.length === 0) setLoading(true);
       setError(null);
 
       try {

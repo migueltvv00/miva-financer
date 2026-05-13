@@ -22,7 +22,7 @@ export function useNetWorthItems(userId: string | null | undefined) {
     let active = true;
 
     const load = async () => {
-      setLoading(true);
+      if (useNetWorthItemStore.getState().items.length === 0) setLoading(true);
       try {
         const { data, error } = await supabase
           .from('net_worth_items')
@@ -31,7 +31,41 @@ export function useNetWorthItems(userId: string | null | undefined) {
           .order('sort_order', { ascending: true });
 
         if (error) throw error;
-        if (active) setItems((data ?? []) as NetWorthItem[]);
+        if (!active) return;
+
+        const items = (data ?? []) as NetWorthItem[];
+        setItems(items);
+
+        // Backfill: if no savings_goal items exist, sync from existing goals
+        const hasSavingsGoalItems = items.some((i) => i.source === 'savings_goal');
+        if (!hasSavingsGoalItems) {
+          try {
+            const { data: goals } = await supabase
+              .from('savings_goals')
+              .select('id, name, current_cents, emoji')
+              .eq('user_id', userId)
+              .gt('current_cents', 0);
+
+            if (goals && goals.length > 0 && active) {
+              const newItems = goals.map((g) => ({
+                user_id: userId,
+                name: g.name,
+                type: 'asset' as const,
+                value_cents: g.current_cents,
+                source: 'savings_goal' as const,
+                source_id: g.id,
+                emoji: g.emoji,
+              }));
+              const { data: inserted } = await supabase
+                .from('net_worth_items')
+                .insert(newItems)
+                .select();
+              if (inserted && active) {
+                setItems([...items, ...(inserted as NetWorthItem[])]);
+              }
+            }
+          } catch { /* backfill is non-critical */ }
+        }
       } catch (err) {
         console.error('Erro ao carregar itens de patrimônio:', err);
         if (active) setItems([]);

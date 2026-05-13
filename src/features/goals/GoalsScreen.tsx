@@ -468,3 +468,4 @@ export function GoalsScreen() {
     </div>
   );
 }
+export default GoalsScreen;
