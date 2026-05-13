@@ -1,20 +1,13 @@
 import { useEffect } from 'react';
-import { format, startOfMonth } from 'date-fns';
 import { supabase } from '@/lib/supabase';
+import { getPeriodKey, getPeriodRange } from '@/lib/periodUtils';
 import { useBudgetStore } from '@/store/budgetStore';
 import { useTransactionStore } from '@/store/transactionStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { Budget, Transaction } from '@/types';
 
-function getMonthKey(date: Date) {
-  return format(startOfMonth(date), 'yyyy-MM-dd');
-}
-
-function getMonthPrefix(date: Date) {
-  return format(startOfMonth(date), 'yyyy-MM');
-}
-
-function isTransactionInMonth(transaction: Partial<Transaction>, monthPrefix: string) {
-  return typeof transaction.date === 'string' && transaction.date.startsWith(monthPrefix);
+function isTransactionInPeriod(transaction: Partial<Transaction>, periodStart: string, periodEnd: string) {
+  return typeof transaction.date === 'string' && transaction.date >= periodStart && transaction.date < periodEnd;
 }
 
 function isBudgetInMonth(budget: Partial<Budget>, monthKey: string) {
@@ -23,7 +16,8 @@ function isBudgetInMonth(budget: Partial<Budget>, monthKey: string) {
 
 function handleTransactionChange(
   payload: { eventType: 'INSERT' | 'UPDATE' | 'DELETE'; new: Record<string, unknown>; old: Record<string, unknown> },
-  monthPrefix: string
+  periodStart: string,
+  periodEnd: string
 ) {
   const { addTransaction, removeTransaction, updateTransaction, transactions } =
     useTransactionStore.getState();
@@ -50,7 +44,7 @@ function handleTransactionChange(
     return;
   }
 
-  if (!isTransactionInMonth(nextTransaction, monthPrefix)) {
+  if (!isTransactionInPeriod(nextTransaction, periodStart, periodEnd)) {
     if (existingTransaction) {
       removeTransaction(recordId);
     }
@@ -119,8 +113,9 @@ export function useRealtimeSync(
       return;
     }
 
-    const monthKey = getMonthKey(selectedMonth);
-    const monthPrefix = getMonthPrefix(selectedMonth);
+    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+    const monthKey = getPeriodKey(selectedMonth, monthStartDay);
+    const { periodStart, periodEnd } = getPeriodRange(selectedMonth, monthStartDay);
 
     const channel = supabase
       .channel(`dashboard-sync:${userId}:${monthKey}`)
@@ -139,7 +134,8 @@ export function useRealtimeSync(
               new: Record<string, unknown>;
               old: Record<string, unknown>;
             },
-            monthPrefix
+            periodStart,
+            periodEnd
           );
         }
       )

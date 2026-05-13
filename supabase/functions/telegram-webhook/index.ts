@@ -269,6 +269,9 @@ async function handleMessage(message: TelegramMessage) {
       await sendMessage(chatId, "Não há ações pendentes.");
       log("cmd_cancelar", "success", chatId);
       return;
+    case "/periodo":
+      await handlePeriodoCommand(chatId, userId, text);
+      return;
     case "/ajuda":
       log("cmd_ajuda", "start", chatId);
       await sendMessage(chatId, getHelpText());
@@ -505,7 +508,8 @@ async function handleStartCommand(message: TelegramMessage, text: string) {
 
 async function handleSaldoCommand(chatId: string, userId: string) {
   log("cmd_saldo", "start", chatId);
-  const { monthStart, nextMonthStart, monthLabel } = getCurrentMonthRange();
+  const startDay = await getUserMonthStartDay(userId);
+  const { monthStart, nextMonthStart, monthLabel } = getCurrentMonthRange(new Date(), startDay);
 
   const [{ data: budgetsData, error: budgetsError }, { data: transactionsData, error: transactionsError }] =
     await Promise.all([
@@ -589,7 +593,8 @@ async function handleSaldoCommand(chatId: string, userId: string) {
 
 async function handleResumoCommand(chatId: string, userId: string) {
   log("cmd_resumo", "start", chatId);
-  const { monthStart, nextMonthStart, monthLabel } = getCurrentMonthRange();
+  const startDay = await getUserMonthStartDay(userId);
+  const { monthStart, nextMonthStart, monthLabel } = getCurrentMonthRange(new Date(), startDay);
   const { data: summaryData, error } = await supabase
     .from("transactions")
     .select("type, amount_cents")
@@ -765,6 +770,54 @@ async function handleReciboCommand(chatId: string) {
   const msg = `📄 *Recibo ${monthLabel}*\nEntidade: ${lastPayslip.employer_name || "—"}\nLíquido: ${netFormatted}\nIRS: ${irsFormatted}   SS: ${ssFormatted}\n_Importado em: ${importedAt}_`;
   await sendMessage(chatId, msg, undefined, "Markdown");
   log("cmd_recibo", "success", chatId, { found: true, month: lastPayslip.month });
+}
+
+async function handlePeriodoCommand(chatId: string, userId: string, text: string) {
+  log("cmd_periodo", "start", chatId);
+
+  const parts = text.trim().split(/\s+/);
+  const dayArg = parts[1] ? parseInt(parts[1], 10) : NaN;
+
+  if (!dayArg || isNaN(dayArg)) {
+    // Show current setting
+    const { data } = await supabase
+      .from("user_settings")
+      .select("month_start_day")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const currentDay = data?.month_start_day ?? 1;
+    await sendMessage(
+      chatId,
+      `📅 O teu mês financeiro começa no dia *${currentDay}*.\n\nPara alterar, envia:\n\`/periodo <dia>\`\n\nExemplo: \`/periodo 23\``,
+      undefined,
+      "Markdown"
+    );
+    log("cmd_periodo", "success", chatId, { action: "show", day: currentDay });
+    return;
+  }
+
+  if (dayArg < 1 || dayArg > 28) {
+    await sendMessage(chatId, "❌ O dia deve estar entre 1 e 28.");
+    log("cmd_periodo", "error", chatId, { reason: "invalid_day", day: dayArg });
+    return;
+  }
+
+  const { error } = await supabase
+    .from("user_settings")
+    .upsert(
+      { user_id: userId, month_start_day: dayArg, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+
+  if (error) {
+    await sendMessage(chatId, "❌ Erro ao guardar a definição. Tenta novamente.");
+    log("cmd_periodo", "error", chatId, { reason: "db_error", error: error.message });
+    return;
+  }
+
+  await sendMessage(chatId, `✅ Período mensal alterado para começar no dia *${dayArg}*.`, undefined, "Markdown");
+  log("cmd_periodo", "success", chatId, { action: "set", day: dayArg });
 }
 
 async function handleDesligarCommand(chatId: string) {
@@ -1428,7 +1481,8 @@ async function getBudgetProgress(
   userId: string,
   categoryId: string
 ): Promise<BudgetProgress | null> {
-  const { monthStart, nextMonthStart } = getCurrentMonthRange();
+  const startDay = await getUserMonthStartDay(userId);
+  const { monthStart, nextMonthStart } = getCurrentMonthRange(new Date(), startDay);
   const [{ data: budgetData, error: budgetError }, { data: transactionData, error: transactionsError }] =
     await Promise.all([
       client
@@ -1489,7 +1543,8 @@ async function checkBudgetAlert(
     return;
   }
 
-  const { monthStart } = getCurrentMonthRange();
+  const startDay = await getUserMonthStartDay(userId);
+  const { monthStart } = getCurrentMonthRange(new Date(), startDay);
   const threshold = progress.percentage >= 1 ? 100 : 80;
   const { data: existing, error: existingError } = await client
     .from("budget_alerts")
@@ -1933,13 +1988,44 @@ function formatDate(dateStr: string): string {
   return `${day}/${month}/${year}`;
 }
 
-function getCurrentMonthRange(referenceDate = new Date()) {
+async function getUserMonthStartDay(userId: string): Promise<number> {
+  const { data } = await supabase
+    .from("user_settings")
+    .select("month_start_day")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data?.month_start_day ?? 1;
+}
+
+function getCurrentMonthRange(referenceDate = new Date(), startDay = 1) {
+  const day = Math.max(1, Math.min(28, startDay));
   const year = referenceDate.getUTCFullYear();
   const month = referenceDate.getUTCMonth();
-  const monthStart = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
-  const nextMonthStart = new Date(Date.UTC(year, month + 1, 1)).toISOString().slice(0, 10);
+  const dateOfMonth = referenceDate.getUTCDate();
+
+  let periodStartYear: number;
+  let periodStartMonth: number;
+
+  if (day === 1) {
+    periodStartYear = year;
+    periodStartMonth = month;
+  } else if (dateOfMonth >= day) {
+    periodStartYear = year;
+    periodStartMonth = month;
+  } else {
+    // Period started in previous calendar month
+    const d = new Date(Date.UTC(year, month - 1, day));
+    periodStartYear = d.getUTCFullYear();
+    periodStartMonth = d.getUTCMonth();
+  }
+
+  const monthStart = new Date(Date.UTC(periodStartYear, periodStartMonth, day)).toISOString().slice(0, 10);
+  const nextPeriodDate = new Date(Date.UTC(periodStartYear, periodStartMonth + 1, day));
+  const nextMonthStart = nextPeriodDate.toISOString().slice(0, 10);
+
+  const labelDate = new Date(Date.UTC(periodStartYear, periodStartMonth, 15));
   const monthLabel = capitalize(
-    new Intl.DateTimeFormat("pt-PT", { month: "long", timeZone: "UTC" }).format(referenceDate)
+    new Intl.DateTimeFormat("pt-PT", { month: "long", year: "numeric", timeZone: "UTC" }).format(labelDate)
   );
 
   return { monthStart, nextMonthStart, monthLabel };
@@ -1963,6 +2049,7 @@ function getHelpText() {
     "/apagar — eliminar uma transação recente",
     "/quota — ver o uso do Gemini hoje",
     "/recibo — ver o último recibo importado",
+    "/periodo — ver ou alterar o dia de início do mês",
     "/gasto 12.50 almoço — registar despesa manualmente",
     "/receita 1400 salário — registar receita manualmente",
     "/cancelar — cancelar a ação pendente",

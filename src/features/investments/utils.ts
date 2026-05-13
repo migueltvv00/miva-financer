@@ -1,17 +1,21 @@
-import { format, parseISO, startOfMonth } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { pt } from 'date-fns/locale/pt';
+import { getPeriodStart, getPeriodKey, getPeriodLabel } from '@/lib/periodUtils';
+import { useSettingsStore } from '@/store/settingsStore';
 
 export function getMonthStart(date: Date) {
-  return startOfMonth(date);
+  const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+  return getPeriodStart(date, monthStartDay);
 }
 
 export function getMonthKey(date: Date) {
-  return format(getMonthStart(date), 'yyyy-MM-dd');
+  const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+  return getPeriodKey(date, monthStartDay);
 }
 
 export function getMonthLabel(date: Date) {
-  const label = format(getMonthStart(date), 'LLLL yyyy', { locale: pt });
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+  const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+  return getPeriodLabel(date, monthStartDay);
 }
 
 export function formatMonthLabel(month: string, pattern: 'LLL yy' | 'LLLL yyyy') {

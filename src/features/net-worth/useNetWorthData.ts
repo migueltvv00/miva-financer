@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { addMonths, format, startOfMonth } from 'date-fns';
-import { pt } from 'date-fns/locale/pt';
+import { getPeriodStart, getPeriodKey, getPeriodLabel, getNextPeriod, getPreviousPeriod } from '@/lib/periodUtils';
 import { supabase } from '@/lib/supabase';
 import { useNetWorthStore } from '@/store/netWorthStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { NetWorthEntry } from '@/types';
 
 interface NetWorthPrefillData {
@@ -28,19 +28,6 @@ interface UseNetWorthDataResult {
   deleteEntry: () => Promise<void>;
 }
 
-function getMonthStart(date: Date) {
-  return startOfMonth(date);
-}
-
-function getMonthKey(date: Date) {
-  return format(getMonthStart(date), 'yyyy-MM-dd');
-}
-
-function getMonthLabel(date: Date) {
-  const label = format(getMonthStart(date), 'LLLL yyyy', { locale: pt });
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
-}
-
 export function useNetWorthData(
   userId: string | null | undefined
 ): UseNetWorthDataResult {
@@ -51,12 +38,13 @@ export function useNetWorthData(
   const updateEntry = useNetWorthStore((state) => state.updateEntry);
   const removeEntry = useNetWorthStore((state) => state.removeEntry);
   const setLoading = useNetWorthStore((state) => state.setLoading);
+  const monthStartDay = useSettingsStore((state) => state.settings.monthStartDay);
 
-  const [selectedMonth, setSelectedMonth] = useState(() => getMonthStart(new Date()));
+  const [selectedMonth, setSelectedMonth] = useState(() => getPeriodStart(new Date(), monthStartDay));
   const [error, setError] = useState<string | null>(null);
 
-  const monthKey = useMemo(() => getMonthKey(selectedMonth), [selectedMonth]);
-  const monthLabel = useMemo(() => getMonthLabel(selectedMonth), [selectedMonth]);
+  const monthKey = useMemo(() => getPeriodKey(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
+  const monthLabel = useMemo(() => getPeriodLabel(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
   const currentEntry = useMemo(
     () => entries.find((entry) => entry.month === monthKey) ?? null,
     [entries, monthKey]
@@ -117,13 +105,13 @@ export function useNetWorthData(
 
   const goToPreviousMonth = useCallback(() => {
     setError(null);
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, -1)));
-  }, []);
+    setSelectedMonth((currentMonth) => getPreviousPeriod(currentMonth, monthStartDay));
+  }, [monthStartDay]);
 
   const goToNextMonth = useCallback(() => {
     setError(null);
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, 1)));
-  }, []);
+    setSelectedMonth((currentMonth) => getNextPeriod(currentMonth, monthStartDay));
+  }, [monthStartDay]);
 
   const saveEntry = useCallback(
     async (assets: Record<string, number>, liabilities: Record<string, number>) => {
@@ -185,7 +173,7 @@ export function useNetWorthData(
 
   const copyFromLastMonth = useCallback(() => {
     setError(null);
-    const previousMonthKey = getMonthKey(addMonths(selectedMonth, -1));
+    const previousMonthKey = getPeriodKey(getPreviousPeriod(selectedMonth, monthStartDay), monthStartDay);
     const previousEntry = entries.find((entry) => entry.month === previousMonthKey);
 
     if (!previousEntry) {

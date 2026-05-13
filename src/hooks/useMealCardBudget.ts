@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { format, startOfMonth } from 'date-fns';
 import { supabase } from '@/lib/supabase';
+import { getPeriodKey, getPeriodRange } from '@/lib/periodUtils';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { MealCardBudget } from '@/types';
 
 interface UseMealCardBudgetResult {
@@ -16,8 +17,10 @@ export function useMealCardBudget(userId: string | null | undefined): UseMealCar
   const [budget, setBudget] = useState<MealCardBudget | null>(null);
   const [spent, setSpent] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const monthStartDay = useSettingsStore((state) => state.settings.monthStartDay);
 
-  const monthKey = useMemo(() => format(startOfMonth(new Date()), 'yyyy-MM-dd'), []);
+  const monthKey = useMemo(() => getPeriodKey(new Date(), monthStartDay), [monthStartDay]);
+  const { periodStart, periodEnd } = useMemo(() => getPeriodRange(new Date(), monthStartDay), [monthStartDay]);
 
   useEffect(() => {
     if (!userId) {
@@ -45,8 +48,8 @@ export function useMealCardBudget(userId: string | null | undefined): UseMealCar
             .eq('user_id', userId)
             .eq('type', 'expense')
             .eq('payment_method', 'cartao_refeicao')
-            .gte('date', monthKey)
-            .lt('date', getNextMonth(monthKey)),
+            .gte('date', periodStart)
+            .lt('date', periodEnd),
         ]);
 
         if (!active) return;
@@ -73,7 +76,7 @@ export function useMealCardBudget(userId: string | null | undefined): UseMealCar
 
     void load();
     return () => { active = false; };
-  }, [userId, monthKey]);
+  }, [userId, monthKey, periodStart, periodEnd]);
 
   const allowance = budget?.allowance_cents ?? 0;
   const remaining = allowance - spent;
@@ -87,10 +90,4 @@ export function useMealCardBudget(userId: string | null | undefined): UseMealCar
     isLoading,
     hasBudget: budget !== null,
   };
-}
-
-function getNextMonth(monthKey: string): string {
-  const date = new Date(monthKey);
-  date.setMonth(date.getMonth() + 1);
-  return format(startOfMonth(date), 'yyyy-MM-dd');
 }

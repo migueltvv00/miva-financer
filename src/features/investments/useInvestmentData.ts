@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { addMonths } from 'date-fns';
 import { supabase } from '@/lib/supabase';
+import { getPreviousPeriod, getNextPeriod, getPeriodKey } from '@/lib/periodUtils';
 import { useInvestmentAccountStore } from '@/store/investmentAccountStore';
 import { useInvestmentSnapshotStore } from '@/store/investmentSnapshotStore';
 import { useNetWorthStore } from '@/store/netWorthStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { InvestmentAccount, InvestmentSnapshot, NetWorthEntry } from '@/types';
 import type { InvestmentAccountFormValues } from './AccountModal';
 import { getFriendlyErrorMessage, getMonthKey, getMonthLabel, getMonthStart } from './utils';
@@ -156,13 +157,15 @@ export function useInvestmentData(
   }, [prefilledSnapshots, storedSnapshots]);
 
   const goToPreviousMonth = useCallback(() => {
+    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
     setError(null);
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, -1)));
+    setSelectedMonth((currentMonth) => getPreviousPeriod(currentMonth, monthStartDay));
   }, []);
 
   const goToNextMonth = useCallback(() => {
+    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
     setError(null);
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, 1)));
+    setSelectedMonth((currentMonth) => getNextPeriod(currentMonth, monthStartDay));
   }, []);
 
   const createAccount = useCallback(
@@ -401,7 +404,8 @@ export function useInvestmentData(
   );
 
   const copyFromLastMonth = useCallback(() => {
-    const previousMonthKey = getMonthKey(addMonths(selectedMonth, -1));
+    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+    const previousMonthKey = getPeriodKey(getPreviousPeriod(selectedMonth, monthStartDay), monthStartDay);
     const previousMonthSnapshots = storedSnapshots.filter(
       (snapshot) => snapshot.month === previousMonthKey
     );

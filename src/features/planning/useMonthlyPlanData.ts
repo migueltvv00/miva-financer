@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { addMonths, format, startOfMonth } from 'date-fns';
-import { pt } from 'date-fns/locale/pt';
+import { getPeriodStart, getPeriodKey, getPeriodLabel, getNextPeriod, getPreviousPeriod } from '@/lib/periodUtils';
 import { supabase } from '@/lib/supabase';
 import { useMonthlyPlanStore } from '@/store/monthlyPlanStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { Budget, MonthlyPlan } from '@/types';
 
 interface UseMonthlyPlanDataResult {
@@ -17,19 +17,6 @@ interface UseMonthlyPlanDataResult {
   saveExpectedIncome: (cents: number) => Promise<void>;
   saveNotes: (notes: string | null) => Promise<void>;
   copyPlanToNextMonth: () => Promise<void>;
-}
-
-function getMonthStart(date: Date) {
-  return startOfMonth(date);
-}
-
-function getMonthKey(date: Date) {
-  return format(getMonthStart(date), 'yyyy-MM-dd');
-}
-
-function getMonthLabel(date: Date) {
-  const label = format(getMonthStart(date), 'LLLL yyyy', { locale: pt });
-  return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
 }
 
 function createOptimisticPlan(
@@ -55,12 +42,13 @@ export function useMonthlyPlanData(
   const isLoading = useMonthlyPlanStore((state) => state.isLoading);
   const setPlan = useMonthlyPlanStore((state) => state.setPlan);
   const setLoading = useMonthlyPlanStore((state) => state.setLoading);
+  const monthStartDay = useSettingsStore((state) => state.settings.monthStartDay);
 
-  const [selectedMonth, setSelectedMonth] = useState(() => getMonthStart(new Date()));
+  const [selectedMonth, setSelectedMonth] = useState(() => getPeriodStart(new Date(), monthStartDay));
   const [error, setError] = useState<string | null>(null);
 
-  const monthKey = useMemo(() => getMonthKey(selectedMonth), [selectedMonth]);
-  const monthLabel = useMemo(() => getMonthLabel(selectedMonth), [selectedMonth]);
+  const monthKey = useMemo(() => getPeriodKey(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
+  const monthLabel = useMemo(() => getPeriodLabel(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
 
   useEffect(() => {
     let isActive = true;
@@ -117,12 +105,12 @@ export function useMonthlyPlanData(
   }, [monthKey, setLoading, setPlan, userId]);
 
   const goToPreviousMonth = useCallback(() => {
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, -1)));
-  }, []);
+    setSelectedMonth((currentMonth) => getPreviousPeriod(currentMonth, monthStartDay));
+  }, [monthStartDay]);
 
   const goToNextMonth = useCallback(() => {
-    setSelectedMonth((currentMonth) => getMonthStart(addMonths(currentMonth, 1)));
-  }, []);
+    setSelectedMonth((currentMonth) => getNextPeriod(currentMonth, monthStartDay));
+  }, [monthStartDay]);
 
   const saveExpectedIncome = useCallback(
     async (cents: number) => {
@@ -217,7 +205,7 @@ export function useMonthlyPlanData(
       throw new Error('Sessão indisponível.');
     }
 
-    const nextMonthKey = getMonthKey(addMonths(selectedMonth, 1));
+    const nextMonthKey = getPeriodKey(getNextPeriod(selectedMonth, monthStartDay), monthStartDay);
 
     setError(null);
 

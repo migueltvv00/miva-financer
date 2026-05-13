@@ -1,4 +1,5 @@
-import { format, startOfMonth, subMonths } from 'date-fns';
+import { getPeriodKey, getPreviousPeriod, getPeriodStart } from '@/lib/periodUtils';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { Category, Transaction } from '@/types';
 
 export interface CategoryTrend {
@@ -11,16 +12,19 @@ export interface CategoryTrend {
   insightText: string;
 }
 
-function getMonthKey(date: Date) {
-  return format(startOfMonth(date), 'yyyy-MM');
-}
-
-function getMonthKeys(referenceDate: Date, count: number, offset = 0) {
-  const referenceMonth = startOfMonth(referenceDate);
-
-  return Array.from({ length: count }, (_, index) =>
-    getMonthKey(subMonths(referenceMonth, count - 1 - index + offset))
-  );
+function getMonthKeysForTrend(referenceDate: Date, count: number, offset: number, monthStartDay: number): string[] {
+  let date = getPeriodStart(referenceDate, monthStartDay);
+  // Move back by offset periods
+  for (let i = 0; i < offset; i++) {
+    date = getPreviousPeriod(date, monthStartDay);
+  }
+  // Now collect `count` periods going further back
+  const keys: string[] = [];
+  for (let i = 0; i < count; i++) {
+    keys.unshift(getPeriodKey(date, monthStartDay));
+    date = getPreviousPeriod(date, monthStartDay);
+  }
+  return keys;
 }
 
 function calculateAverage(monthTotals: Map<string, number>, monthKeys: string[]) {
@@ -72,13 +76,14 @@ export function computeCategoryTrends(
   categories: Category[],
   referenceDate = new Date()
 ): CategoryTrend[] {
-  const chartMonthKeys = getMonthKeys(referenceDate, 6);
+  const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+  const chartMonthKeys = getMonthKeysForTrend(referenceDate, 6, 0, monthStartDay);
   const currentMonthKey =
     chartMonthKeys.length > 0
       ? chartMonthKeys[chartMonthKeys.length - 1]!
-      : getMonthKey(referenceDate);
-  const avg3MonthKeys = getMonthKeys(referenceDate, 3, 1);
-  const avg6MonthKeys = getMonthKeys(referenceDate, 6, 1);
+      : getPeriodKey(referenceDate, monthStartDay);
+  const avg3MonthKeys = getMonthKeysForTrend(referenceDate, 3, 1, monthStartDay);
+  const avg6MonthKeys = getMonthKeysForTrend(referenceDate, 6, 1, monthStartDay);
   const relevantMonthKeys = new Set([...chartMonthKeys, ...avg6MonthKeys]);
   const totalsByCategory = new Map<string, Map<string, number>>();
 
@@ -87,16 +92,16 @@ export function computeCategoryTrends(
       return;
     }
 
-    const monthKey = transaction.date.slice(0, 7);
+    const txPeriodKey = getPeriodKey(new Date(transaction.date), monthStartDay);
 
-    if (!relevantMonthKeys.has(monthKey)) {
+    if (!relevantMonthKeys.has(txPeriodKey)) {
       return;
     }
 
     const categoryTotals = totalsByCategory.get(transaction.category_id) ?? new Map();
     categoryTotals.set(
-      monthKey,
-      (categoryTotals.get(monthKey) ?? 0) + transaction.amount_cents
+      txPeriodKey,
+      (categoryTotals.get(txPeriodKey) ?? 0) + transaction.amount_cents
     );
     totalsByCategory.set(transaction.category_id, categoryTotals);
   });

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { endOfMonth, format, startOfMonth } from 'date-fns';
+import { getPeriodRange } from '@/lib/periodUtils';
 import { supabase } from '@/lib/supabase';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useTransactionStore } from '@/store/transactionStore';
 import type { Transaction } from '@/types';
 
@@ -43,8 +44,8 @@ export function useTransactionData(
       }
 
       const isSilent = options?.silent ?? false;
-      const monthStart = format(startOfMonth(selectedMonth), 'yyyy-MM-dd');
-      const monthEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
+      const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+      const { periodStart, periodEnd } = getPeriodRange(selectedMonth, monthStartDay);
 
       if (isSilent) {
         setIsRefreshing(true);
@@ -59,8 +60,8 @@ export function useTransactionData(
           .from('transactions')
           .select('*')
           .eq('user_id', userId)
-          .gte('date', monthStart)
-          .lte('date', monthEnd)
+          .gte('date', periodStart)
+          .lt('date', periodEnd)
           .order('date', { ascending: false });
 
         if (fetchError) {

@@ -1,5 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { endOfMonth, format, startOfYear } from 'date-fns';
+import { format, startOfYear } from 'date-fns';
+import { getPeriodEnd } from '@/lib/periodUtils';
+import { useSettingsStore } from '@/store/settingsStore';
 import {
   Area,
   AreaChart,
@@ -428,7 +430,8 @@ export function DashboardScreen() {
 
       try {
         const yearStart = format(startOfYear(selectedMonth), 'yyyy-MM-dd');
-        const yearToDateEnd = format(endOfMonth(selectedMonth), 'yyyy-MM-dd');
+        const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+        const yearToDateEnd = format(getPeriodEnd(selectedMonth, monthStartDay), 'yyyy-MM-dd');
         const freelanceSourceIdSet = new Set(freelanceSourceIds);
 
         const { data, error } = await supabase

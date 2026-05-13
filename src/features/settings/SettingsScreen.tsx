@@ -11,6 +11,7 @@ import { IncomeSourceList } from '@/features/income-sources/IncomeSourceList';
 import { InstalmentList } from '@/features/instalments/InstalmentList';
 import { PlanningScreen } from '@/features/planning/PlanningScreen';
 import { GeminiQuotaPanel } from '@/features/settings/GeminiQuotaPanel';
+import { PeriodSettings } from '@/features/settings/PeriodSettings';
 import { PayslipImport } from '@/features/settings/PayslipImport';
 import { TelegramSettings } from '@/features/settings/TelegramSettings';
 import { useAuth } from '@/contexts/AuthContext';
@@ -94,6 +95,7 @@ export function SettingsScreen() {
         <CategoryList userId={user?.id} loadError={categoryError} />
         <IncomeSourceList userId={user?.id} />
         <InstalmentList userId={user?.id} />
+        <PeriodSettings />
         <PlanningScreen userId={user?.id} />
         <BudgetScreen userId={user?.id} categoryError={categoryError} />
 

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { endOfMonth, format, startOfMonth, subMonths } from 'date-fns';
 import { supabase } from '@/lib/supabase';
+import { getPeriodKey, getPeriodRange, getPreviousPeriod, getPeriodStart } from '@/lib/periodUtils';
 import { useTransactionStore } from '@/store/transactionStore';
+import { useSettingsStore } from '@/store/settingsStore';
 import type { Transaction } from '@/types';
 
 interface UseTrendTransactionDataResult {
@@ -20,9 +21,10 @@ export function useTrendTransactionData(
   );
   const [error, setError] = useState<string | null>(null);
   const requestIdRef = useRef(0);
+  const monthStartDay = useSettingsStore((state) => state.settings.monthStartDay);
   const referenceMonthKey = useMemo(
-    () => format(startOfMonth(referenceDate), 'yyyy-MM'),
-    [referenceDate]
+    () => getPeriodKey(referenceDate, monthStartDay),
+    [referenceDate, monthStartDay]
   );
 
   useEffect(() => {
@@ -44,16 +46,21 @@ export function useTrendTransactionData(
       setError(null);
 
       try {
-        const currentMonth = startOfMonth(referenceDate);
-        const rangeStart = format(startOfMonth(subMonths(currentMonth, 6)), 'yyyy-MM-dd');
-        const rangeEnd = format(endOfMonth(currentMonth), 'yyyy-MM-dd');
+        // Get range covering 7 periods back from reference (6 previous + current)
+        let rangeStartDate = getPeriodStart(referenceDate, monthStartDay);
+        for (let i = 0; i < 6; i++) {
+          rangeStartDate = getPreviousPeriod(rangeStartDate, monthStartDay);
+        }
+        const { periodEnd } = getPeriodRange(referenceDate, monthStartDay);
+        const rangeStart = getPeriodKey(rangeStartDate, monthStartDay);
+
         const { data, error: fetchError } = await supabase
           .from('transactions')
           .select('*')
           .eq('user_id', userId)
           .eq('type', 'expense')
           .gte('date', rangeStart)
-          .lte('date', rangeEnd)
+          .lt('date', periodEnd)
           .order('date', { ascending: false });
 
         if (fetchError) {

@@ -1,14 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type TouchEvent } from 'react';
 import {
-  addMonths,
   format,
-  isSameMonth,
   isSameYear,
   isToday,
   isYesterday,
-  subMonths,
 } from 'date-fns';
 import { pt } from 'date-fns/locale/pt';
+import { getPreviousPeriod, getNextPeriod, getPeriodLabel, isDateInPeriod } from '@/lib/periodUtils';
+import { useSettingsStore } from '@/store/settingsStore';
 import { useCategoryData } from '@/features/categories/useCategoryData';
 import { useInstalmentData } from '@/features/instalments/useInstalmentData';
 import { getInstalmentTransactionPosition } from '@/features/instalments/utils';
@@ -65,8 +64,9 @@ function capitalizeLabel(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function getMonthLabel(date: Date) {
-  return capitalizeLabel(format(date, 'MMMM yyyy', { locale: pt }));
+function getMonthLabelLocal(date: Date) {
+  const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+  return getPeriodLabel(date, monthStartDay);
 }
 
 function getTransactionGroupLabel(dateValue: string) {
@@ -480,9 +480,11 @@ export function TransactionListScreen() {
       updated_at: updatedAt,
     };
 
-    const staysInSelectedMonth = isSameMonth(
+    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+    const staysInSelectedMonth = isDateInPeriod(
       toLocalDate(updatedTransaction.date),
-      selectedMonth
+      selectedMonth,
+      monthStartDay
     );
 
     const nextTransactions = staysInSelectedMonth
@@ -702,7 +704,10 @@ export function TransactionListScreen() {
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
-              onClick={() => setSelectedMonth((currentValue) => subMonths(currentValue, 1))}
+              onClick={() => setSelectedMonth((currentValue) => {
+                const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+                return getPreviousPeriod(currentValue, monthStartDay);
+              })}
               className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] text-xl text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)]"
               aria-label="Mês anterior"
             >
@@ -711,14 +716,17 @@ export function TransactionListScreen() {
 
             <div className="flex-1 text-center">
               <p className="text-lg font-semibold text-[var(--color-text)]">
-                {getMonthLabel(selectedMonth)}
+                {getMonthLabelLocal(selectedMonth)}
               </p>
               <p className="text-xs text-[var(--color-text-secondary)]">{pullHint}</p>
             </div>
 
             <button
               type="button"
-              onClick={() => setSelectedMonth((currentValue) => addMonths(currentValue, 1))}
+              onClick={() => setSelectedMonth((currentValue) => {
+                const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
+                return getNextPeriod(currentValue, monthStartDay);
+              })}
               className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-border)] text-xl text-[var(--color-text)] transition-colors hover:bg-[var(--color-bg-secondary)]"
               aria-label="Mês seguinte"
             >
