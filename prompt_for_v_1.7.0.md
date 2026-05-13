@@ -173,7 +173,7 @@ Fix:
 
 Verification gate for Part A:
 - Upload a real Portuguese payslip PDF.
-- Supabase logs show op="gemini" status="ok" with model=gemini-1.5-flash.
+- Supabase logs show op="gemini" status="ok" with model=gemini-3.1-flash-lite.
 - Frontend shows the review screen with extracted values.
 - Do not proceed to Part B until this passes.
 
@@ -334,7 +334,7 @@ show total filtered. No new screen needed.
 Implement in strict order: Part A → Part B → Part C.
 
 PART A — Payslip parsing fix:
-1. parse-payslip/index.ts: change model to gemini-1.5-flash.
+1. parse-payslip/index.ts: change model to gemini-3.1-flash-lite.
 2. Improve error response (include geminiStatus + detail).
 3. PayslipImport.tsx: render detailed error when present.
 4. Redeploy parse-payslip.
@@ -401,7 +401,7 @@ current gate passes.
 
 PART A — Payslip parsing fix
   Gate: upload a real Portuguese payslip PDF via Settings → Recibos.
-  Supabase logs must show op="gemini" status="ok" model="gemini-1.5-flash".
+  Supabase logs must show op="gemini" status="ok" model="gemini-3.1-flash-lite".
   Frontend must show the review screen with non-zero values.
   User confirms extracted values look correct.
 
