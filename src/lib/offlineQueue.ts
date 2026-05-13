@@ -1,6 +1,6 @@
 import { OFFLINE_QUEUE_KEY } from '@/lib/constants';
 import { supabase } from '@/lib/supabase';
-import type { Transaction } from '@/types';
+import { PAYMENT_METHOD_OPTIONS, type Transaction } from '@/types';
 
 function isTransaction(value: unknown): value is Transaction {
   if (!value || typeof value !== 'object') {
@@ -8,6 +8,10 @@ function isTransaction(value: unknown): value is Transaction {
   }
 
   const transaction = value as Partial<Transaction>;
+  const hasValidPaymentMethod =
+    transaction.payment_method === undefined ||
+    transaction.payment_method === null ||
+    PAYMENT_METHOD_OPTIONS.some((option) => option.value === transaction.payment_method);
 
   return (
     typeof transaction.id === 'string' &&
@@ -15,7 +19,8 @@ function isTransaction(value: unknown): value is Transaction {
     typeof transaction.amount_cents === 'number' &&
     (transaction.type === 'expense' || transaction.type === 'income') &&
     typeof transaction.category_id === 'string' &&
-    typeof transaction.date === 'string'
+    typeof transaction.date === 'string' &&
+    hasValidPaymentMethod
   );
 }
 
@@ -35,7 +40,10 @@ function readQueue() {
       return [];
     }
 
-    return parsedQueue.filter(isTransaction);
+    return parsedQueue.filter(isTransaction).map((transaction) => ({
+      ...transaction,
+      payment_method: transaction.payment_method ?? null,
+    }));
   } catch (error) {
     console.error('Erro ao ler a fila offline:', error);
     return [];

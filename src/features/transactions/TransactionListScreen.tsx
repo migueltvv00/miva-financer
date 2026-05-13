@@ -24,7 +24,13 @@ import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
 import { useInstalmentStore } from '@/store/instalmentStore';
 import { useTransactionStore } from '@/store/transactionStore';
-import type { Category, Transaction } from '@/types';
+import {
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_SHORT_LABELS,
+  type Category,
+  type PaymentMethod,
+  type Transaction,
+} from '@/types';
 
 const PULL_REFRESH_THRESHOLD = 72;
 
@@ -248,6 +254,7 @@ export function TransactionListScreen() {
 
   const [selectedMonth, setSelectedMonth] = useState(() => new Date());
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<PaymentMethod[]>([]);
   const [openDeleteActionId, setOpenDeleteActionId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
   const [deleteScope, setDeleteScope] = useState<DeleteScope>(null);
@@ -288,14 +295,26 @@ export function TransactionListScreen() {
 
   const filteredTransactions = useMemo(() => {
     const activeCategoryIds = new Set(selectedCategoryIds);
+    const activePaymentMethods = new Set(selectedPaymentMethods);
+
     return sortTransactions(transactions).filter((transaction) => {
-      if (activeCategoryIds.size === 0) {
-        return true;
+      if (
+        activeCategoryIds.size > 0 &&
+        !activeCategoryIds.has(transaction.category_id)
+      ) {
+        return false;
       }
 
-      return activeCategoryIds.has(transaction.category_id);
+      if (
+        activePaymentMethods.size > 0 &&
+        (!transaction.payment_method || !activePaymentMethods.has(transaction.payment_method))
+      ) {
+        return false;
+      }
+
+      return true;
     });
-  }, [selectedCategoryIds, transactions]);
+  }, [selectedCategoryIds, selectedPaymentMethods, transactions]);
 
   const groupedTransactions = useMemo<TransactionGroup[]>(() => {
     const groups: TransactionGroup[] = [];
@@ -334,7 +353,7 @@ export function TransactionListScreen() {
     setOpenDeleteActionId(null);
     setDeleteScope(null);
     setPendingDelete(null);
-  }, [selectedMonth, selectedCategoryIds]);
+  }, [selectedMonth, selectedCategoryIds, selectedPaymentMethods]);
 
   useEffect(() => {
     if (!toastMessage) {
@@ -355,6 +374,15 @@ export function TransactionListScreen() {
       currentValue.includes(categoryId)
         ? currentValue.filter((value) => value !== categoryId)
         : [...currentValue, categoryId]
+    );
+    setOpenDeleteActionId(null);
+  };
+
+  const handleTogglePaymentMethod = (paymentMethod: PaymentMethod) => {
+    setSelectedPaymentMethods((currentValue) =>
+      currentValue.includes(paymentMethod)
+        ? currentValue.filter((value) => value !== paymentMethod)
+        : [...currentValue, paymentMethod]
     );
     setOpenDeleteActionId(null);
   };
@@ -467,6 +495,7 @@ export function TransactionListScreen() {
           type: values.type,
           category_id: values.category_id,
           source_id: values.source_id,
+          payment_method: values.payment_method,
           note: values.note,
           date: values.date,
           is_recurring: values.is_recurring,
@@ -686,48 +715,97 @@ export function TransactionListScreen() {
           </div>
         </div>
 
-        <div className="space-y-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3 shadow-[var(--shadow-sm)]">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="text-sm font-medium text-[var(--color-text)]">Categorias</h2>
-            <span className="text-xs text-[var(--color-text-secondary)]">
-              Pode selecionar várias
-            </span>
+        <div className="space-y-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3 shadow-[var(--shadow-sm)]">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-medium text-[var(--color-text)]">Categorias</h2>
+              <span className="text-xs text-[var(--color-text-secondary)]">
+                Pode selecionar várias
+              </span>
+            </div>
+
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setSelectedCategoryIds([])}
+                aria-pressed={selectedCategoryIds.length === 0}
+                className={`flex min-h-[44px] shrink-0 items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                  selectedCategoryIds.length === 0
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                }`}
+              >
+                Todas
+              </button>
+
+              {categories.map((category) => {
+                const isSelected = selectedCategoryIds.includes(category.id);
+
+                return (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => handleToggleCategory(category.id)}
+                    aria-pressed={isSelected}
+                    className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                      isSelected
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                    }`}
+                  >
+                    <span aria-hidden="true">{category.emoji}</span>
+                    <span>{category.name}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <button
-              type="button"
-              onClick={() => setSelectedCategoryIds([])}
-              aria-pressed={selectedCategoryIds.length === 0}
-              className={`flex min-h-[44px] shrink-0 items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                selectedCategoryIds.length === 0
-                  ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]'
-                  : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
-              }`}
-            >
-              Todas
-            </button>
+          <div className="space-y-2 border-t border-[var(--color-divider)] pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-sm font-medium text-[var(--color-text)]">
+                Método de pagamento
+              </h2>
+              <span className="text-xs text-[var(--color-text-secondary)]">
+                Pode selecionar várias
+              </span>
+            </div>
 
-            {categories.map((category) => {
-              const isSelected = selectedCategoryIds.includes(category.id);
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentMethods([])}
+                aria-pressed={selectedPaymentMethods.length === 0}
+                className={`flex min-h-[44px] shrink-0 items-center justify-center rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                  selectedPaymentMethods.length === 0
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-text-inverse)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                }`}
+              >
+                Todos
+              </button>
 
-              return (
-                <button
-                  key={category.id}
-                  type="button"
-                  onClick={() => handleToggleCategory(category.id)}
-                  aria-pressed={isSelected}
-                  className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
-                    isSelected
-                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
-                      : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
-                  }`}
-                >
-                  <span aria-hidden="true">{category.emoji}</span>
-                  <span>{category.name}</span>
-                </button>
-              );
-            })}
+              {PAYMENT_METHOD_OPTIONS.map((option) => {
+                const isSelected = selectedPaymentMethods.includes(option.value);
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => handleTogglePaymentMethod(option.value)}
+                    aria-pressed={isSelected}
+                    className={`flex min-h-[44px] shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+                      isSelected
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                    }`}
+                  >
+                    <span aria-hidden="true">{option.emoji}</span>
+                    <span>{PAYMENT_METHOD_SHORT_LABELS[option.value]}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -784,6 +862,11 @@ export function TransactionListScreen() {
                   const instalmentPosition = instalment
                     ? getInstalmentTransactionPosition(instalment, transaction.date)
                     : null;
+                  const paymentMethodOption = transaction.payment_method
+                    ? PAYMENT_METHOD_OPTIONS.find(
+                        (option) => option.value === transaction.payment_method
+                      ) ?? null
+                    : null;
                   const isDeleteOpen = openDeleteActionId === transaction.id;
 
                   return (
@@ -836,7 +919,7 @@ export function TransactionListScreen() {
                             )}
                           </div>
 
-                          {(transaction.note || instalmentPosition !== null) && (
+                          {(transaction.note || instalmentPosition !== null || paymentMethodOption) && (
                             <div className="mt-1 flex flex-wrap items-center gap-2">
                               {transaction.note && (
                                 <span className="max-w-full truncate text-sm text-[var(--color-text-secondary)]">
@@ -846,6 +929,11 @@ export function TransactionListScreen() {
                               {instalment && instalmentPosition !== null && (
                                 <span className="inline-flex rounded-full bg-[var(--color-accent-light)] px-2 py-1 text-[11px] font-semibold text-[var(--color-accent)]">
                                   {instalmentPosition}/{instalment.num_instalments} prestações
+                                </span>
+                              )}
+                              {paymentMethodOption && (
+                                <span className="text-xs text-[var(--color-text-tertiary)]">
+                                  {paymentMethodOption.emoji} {paymentMethodOption.label}
                                 </span>
                               )}
                             </div>

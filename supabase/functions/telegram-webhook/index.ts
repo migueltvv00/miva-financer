@@ -1,6 +1,17 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
+
+const PAYMENT_METHOD_LABELS: Record<string, string> = {
+  cartao_refeicao: "🍽️ Cartão Refeição",
+  multibanco: "🏧 Multibanco",
+  mbway: "📱 MBWay",
+  numerario: "💵 Numerário",
+  credito: "💳 Crédito",
+  debito: "💳 Débito",
+};
+
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -98,6 +109,7 @@ interface ParsedTransaction {
   date: string;
   type: "expense" | "income";
   confidence: number;
+  payment_method: string | null;
 }
 
 interface PendingTransaction {
@@ -108,6 +120,7 @@ interface PendingTransaction {
   note: string;
   date: string;
   type: "expense" | "income";
+  payment_method: string | null;
 }
 
 interface BudgetProgress {
@@ -189,6 +202,9 @@ async function handleMessage(message: TelegramMessage) {
       return;
     case "/ultimas":
       await handleUltimasCommand(chatId, userId);
+      return;
+    case "/quota":
+      await handleQuotaCommand(chatId, session.user_id);
       return;
     case "/cancelar":
       log("cmd_cancelar", "start", chatId);
@@ -537,6 +553,42 @@ async function handleUltimasCommand(chatId: string, userId: string) {
   log("cmd_ultimas", "success", chatId, { transaction_count: transactions.length });
 }
 
+async function handleQuotaCommand(chatId: string, userId: string) {
+  log("cmd_quota", "start", chatId);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const { data: usageRows, error } = await supabase
+    .from("gemini_usage")
+    .select("tokens_in, tokens_out")
+    .eq("user_id", userId)
+    .eq("date", todayStr);
+
+  if (error) {
+    log("cmd_quota", "error", chatId, { error: getErrorMessage(error) });
+    await sendMessage(chatId, "Não foi possível obter o uso do Gemini.");
+    return;
+  }
+
+  const rows = (usageRows ?? []) as Array<{ tokens_in: number | null; tokens_out: number | null }>;
+  const requests = rows.length;
+  const totalTokens = rows.reduce(
+    (sum, row) => sum + (row.tokens_in ?? 0) + (row.tokens_out ?? 0),
+    0
+  );
+  const bar = progressBar(requests, 500);
+  const pct = Math.min(Math.round((requests / 500) * 100), 100);
+  const now = new Date().toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  const quotaMsg = `📊 *Uso Gemini hoje*\nPedidos: ${requests} / 500\nTokens: ${totalTokens}\n${bar}  ${pct}%\nModelo: ${GEMINI_MODEL}\n_Actualizado: ${now}_`;
+
+  await callTelegram("sendMessage", {
+    chat_id: chatId,
+    text: quotaMsg,
+    parse_mode: "Markdown",
+    disable_web_page_preview: true,
+  });
+
+  log("cmd_quota", "success", chatId, { requests, total_tokens: totalTokens });
+}
+
 async function handleDesligarCommand(chatId: string) {
   log("cmd_desligar", "start", chatId);
   await sendMessage(chatId, "⚠️ Tens a certeza que queres desligar o bot do Fluxo?", {
@@ -551,7 +603,7 @@ async function handleDesligarCommand(chatId: string) {
 }
 
 async function handleFreeTextMessage(chatId: string, userId: string, text: string) {
-  const parsed = await parseTransactionMessage(chatId, text);
+  const parsed = await parseTransactionMessage(chatId, text, userId);
 
   if (!parsed || parsed.confidence < 0.7) {
     await sendMessage(chatId, 'Não consegui perceber. Tenta: "café 1.50" ou "salário 1500"');
@@ -573,6 +625,7 @@ async function handleFreeTextMessage(chatId: string, userId: string, text: strin
     note: parsed.note,
     date: parsed.date,
     type: parsed.type,
+    payment_method: parsed.payment_method,
   };
 
   await setPendingTransaction(chatId, pendingTransaction);
@@ -599,6 +652,7 @@ async function handleConfirmTransaction(chatId: string, messageId: number, userI
     type: pendingTransaction.type,
     note: pendingTransaction.note || null,
     date: pendingTransaction.date,
+    payment_method: pendingTransaction.payment_method,
     is_recurring: false,
     recurrence_rule: null,
     recurrence_parent_id: null,
@@ -624,6 +678,10 @@ async function handleConfirmTransaction(chatId: string, messageId: number, userI
     if (budgetProgress) {
       successMessage = `✅ Registado!\n\n${pendingTransaction.category_emoji} ${pendingTransaction.category_name}: ${formatCents(budgetProgress.spentCents)} / ${formatCents(budgetProgress.limitCents)} este mês`;
     }
+  }
+
+  if (pendingTransaction.payment_method && PAYMENT_METHOD_LABELS[pendingTransaction.payment_method]) {
+    successMessage += `\n💳 ${PAYMENT_METHOD_LABELS[pendingTransaction.payment_method]}`;
   }
 
   await safeEditMessage(chatId, messageId, successMessage);
@@ -724,7 +782,13 @@ function buildConfirmationText(transaction: PendingTransaction) {
   const icon = transaction.type === "income" ? "💰" : "💸";
   const note = transaction.note ? ` (${transaction.note})` : "";
   const label = transaction.type === "income" ? "receita" : "despesa";
-  return `Registar ${label}?\n\n${icon} ${formatCents(transaction.amount_cents)} — ${transaction.category_name}${note}\n📅 ${formatDate(transaction.date)}`;
+  let text = `Registar ${label}?\n\n${icon} ${formatCents(transaction.amount_cents)} — ${transaction.category_name}${note}\n📅 ${formatDate(transaction.date)}`;
+
+  if (transaction.payment_method && PAYMENT_METHOD_LABELS[transaction.payment_method]) {
+    text += `\n💳 ${PAYMENT_METHOD_LABELS[transaction.payment_method]}`;
+  }
+
+  return text;
 }
 
 function buildConfirmationKeyboard() {
@@ -741,7 +805,8 @@ function buildConfirmationKeyboard() {
 
 async function parseTransactionMessage(
   chatId: string,
-  message: string
+  message: string,
+  userId: string
 ): Promise<ParsedTransaction | null> {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) {
@@ -751,12 +816,12 @@ async function parseTransactionMessage(
 
   const startedAt = Date.now();
   const today = new Date().toISOString().slice(0, 10);
-  const prompt = `Parse this Portuguese expense message and respond ONLY with valid JSON (no markdown, no explanation):\n{ "amount_cents": integer, "category_hint": string, "note": string, "date": "YYYY-MM-DD", "type": "expense" | "income", "confidence": 0.0-1.0 }\nIf not a financial transaction, return the JSON: null\nMessage: ${JSON.stringify(message)}\nToday's date: ${today}`;
+  const prompt = `Parse this Portuguese expense message and respond ONLY with valid JSON (no markdown, no explanation):\n{ "amount_cents": integer, "category_hint": string, "note": string, "date": "YYYY-MM-DD", "type": "expense" | "income", "confidence": 0.0-1.0, "payment_method": string | null }\npayment_method: extract if the user mentions how they paid. Examples: 'cartão de refeição' or 'ticket' → "cartao_refeicao", 'multibanco' or 'MB' → "multibanco", 'MBWay' → "mbway", 'dinheiro' or 'numerário' → "numerario", 'crédito' → "credito", 'débito' → "debito". Return null if not mentioned.\nIf not a financial transaction, return the JSON: null\nMessage: ${JSON.stringify(message)}\nToday's date: ${today}`;
 
   log("gemini_parse", "start", chatId);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -778,6 +843,26 @@ async function parseTransactionMessage(
   const payload = (await response.json()) as {
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   };
+
+  void (async () => {
+    try {
+      const usageMeta = (payload as Record<string, unknown>).usageMetadata as {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+      } | undefined;
+      await supabase.from("gemini_usage").insert({
+        user_id: userId,
+        model: GEMINI_MODEL,
+        fn_name: "telegram-webhook",
+        date: new Date().toISOString().slice(0, 10),
+        tokens_in: usageMeta?.promptTokenCount ?? 0,
+        tokens_out: usageMeta?.candidatesTokenCount ?? 0,
+      });
+    } catch {
+      // Never let tracking failure affect the main flow
+    }
+  })();
+
   const rawText = payload.candidates?.[0]?.content?.parts
     ?.map((part) => part.text ?? "")
     .join("")
@@ -838,6 +923,7 @@ async function parseTransactionMessage(
       date: parsed.date,
       type: parsed.type,
       confidence: parsed.confidence,
+      payment_method: typeof parsed.payment_method === "string" ? parsed.payment_method : null,
     };
   } catch (error) {
     log("gemini_parse", "error", chatId, {
@@ -1106,6 +1192,13 @@ function getCurrentMonthRange(referenceDate = new Date()) {
   return { monthStart, nextMonthStart, monthLabel };
 }
 
+function progressBar(used: number, total: number, width = 10): string {
+  const ratio = total > 0 ? used / total : 0;
+  const filled = Math.min(width, Math.max(0, Math.round(ratio * width)));
+  const rest = width - filled;
+  return "█".repeat(filled) + "░".repeat(rest);
+}
+
 function getHelpText() {
   return [
     "🤖 Comandos disponíveis",
@@ -1113,6 +1206,7 @@ function getHelpText() {
     "/saldo — ver saldo dos orçamentos deste mês",
     "/resumo — ver rendimento, despesas e saldo do mês",
     "/ultimas — listar as últimas 5 transações",
+    "/quota — ver o uso do Gemini hoje",
     "/cancelar — cancelar a ação pendente",
     "/desligar — desligar esta conta do bot",
     "/ajuda — mostrar esta ajuda",

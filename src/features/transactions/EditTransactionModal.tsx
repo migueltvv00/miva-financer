@@ -6,7 +6,11 @@ import { IncomeSourceSelector } from '@/features/income-sources/IncomeSourceSele
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
-import type { Transaction } from '@/types';
+import {
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_SHORT_LABELS,
+  type Transaction,
+} from '@/types';
 
 const MAX_AMOUNT_CENTS = 99_999_999;
 const TYPE_LABELS: Record<Transaction['type'], string> = {
@@ -28,6 +32,7 @@ export interface EditTransactionFormValues {
   type: Transaction['type'];
   category_id: string;
   source_id: string | null;
+  payment_method: Transaction['payment_method'];
   note: string | null;
   date: string;
   is_recurring: boolean;
@@ -139,6 +144,7 @@ export function EditTransactionModal({
   const [type, setType] = useState<Transaction['type']>('expense');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<Transaction['payment_method']>(null);
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
   const [date, setDate] = useState('');
@@ -174,6 +180,7 @@ export function EditTransactionModal({
     setType(transaction.type);
     setSelectedCategoryId(transaction.category_id);
     setSelectedSourceId(transaction.source_id);
+    setPaymentMethod(transaction.payment_method);
     setAmountInput(formatAmountInputFromCents(transaction.amount_cents));
     setNote(transaction.note ?? '');
     setDate(transaction.date);
@@ -246,6 +253,7 @@ export function EditTransactionModal({
       type,
       category_id: selectedCategoryId,
       source_id: type === 'income' ? selectedSourceId : null,
+      payment_method: paymentMethod,
       note: note.trim() ? note.trim() : null,
       date,
       is_recurring: isRecurring,
@@ -402,6 +410,53 @@ export function EditTransactionModal({
               disabled={isSubmitting}
             />
           )}
+
+          <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+            <div className="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-medium text-[var(--color-text)]">Como pagaste?</h4>
+                <p className="text-xs text-[var(--color-text-secondary)]">
+                  Atualize o método de pagamento desta transação.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPaymentMethod(null);
+                  setValidationError(null);
+                }}
+                className="min-h-[44px] rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-secondary)]"
+              >
+                Saltar
+              </button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {PAYMENT_METHOD_OPTIONS.map((option) => {
+                const isActive = paymentMethod === option.value;
+
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      setPaymentMethod(option.value);
+                      setValidationError(null);
+                    }}
+                    aria-pressed={isActive}
+                    className={`flex min-h-[44px] items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive
+                        ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                        : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                    }`}
+                  >
+                    <span aria-hidden="true">{option.emoji}</span>
+                    <span>{PAYMENT_METHOD_SHORT_LABELS[option.value]}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
 
           <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
             <label

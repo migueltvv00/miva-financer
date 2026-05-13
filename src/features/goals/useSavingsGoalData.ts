@@ -334,6 +334,7 @@ export function useSavingsGoalData(
         recurrence_parent_id: null,
         created_at: timestamp,
         updated_at: timestamp,
+        payment_method: null,
       };
 
       setError(null);

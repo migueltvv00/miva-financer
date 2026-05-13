@@ -13,12 +13,18 @@ import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
 import { useTransactionStore } from '@/store/transactionStore';
-import type { Transaction } from '@/types';
+import {
+  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_SHORT_LABELS,
+  type PaymentMethod,
+  type Transaction,
+} from '@/types';
 
 const MAX_AMOUNT_CENTS = 99_999_999;
 const SUCCESS_FADE_DELAY_MS = 700;
 const SUCCESS_HIDE_DELAY_MS = 1_100;
 const TOAST_HIDE_DELAY_MS = 3_500;
+const LAST_PAYMENT_METHOD_KEY = 'fluxo-last-payment-method';
 
 const TYPE_LABELS: Record<Transaction['type'], string> = {
   expense: 'Despesa',
@@ -135,6 +141,17 @@ export function EntryScreen() {
   const [type, setType] = useState<Transaction['type']>('expense');
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(() => {
+    if (typeof window === 'undefined') {
+      return null;
+    }
+
+    const storedPaymentMethod = window.localStorage.getItem(LAST_PAYMENT_METHOD_KEY);
+    return (
+      PAYMENT_METHOD_OPTIONS.find((option) => option.value === storedPaymentMethod)?.value ??
+      null
+    );
+  });
   const [amountInput, setAmountInput] = useState('');
   const [note, setNote] = useState('');
   const [manualCategoryOverride, setManualCategoryOverride] = useState(false);
@@ -308,6 +325,7 @@ export function EntryScreen() {
       recurrence_parent_id: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
+      payment_method: paymentMethod,
     };
 
     setIsSubmitting(true);
@@ -323,6 +341,10 @@ export function EntryScreen() {
         if (error) {
           throw error;
         }
+      }
+
+      if (paymentMethod && typeof window !== 'undefined') {
+        window.localStorage.setItem(LAST_PAYMENT_METHOD_KEY, paymentMethod);
       }
 
       setAmountInput('');
@@ -495,6 +517,47 @@ export function EntryScreen() {
           disabled={isSubmitting}
         />
       )}
+
+      <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-medium text-[var(--color-text)]">Como pagaste?</h2>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Opcional — memorize o último método usado.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setPaymentMethod(null)}
+            className="min-h-[44px] rounded-[var(--radius-md)] px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-bg-secondary)]"
+          >
+            Saltar
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {PAYMENT_METHOD_OPTIONS.map((option) => {
+            const isActive = paymentMethod === option.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setPaymentMethod(option.value)}
+                aria-pressed={isActive}
+                className={`flex min-h-[44px] items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                    : 'border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-secondary)]'
+                }`}
+              >
+                <span aria-hidden="true">{option.emoji}</span>
+                <span>{PAYMENT_METHOD_SHORT_LABELS[option.value]}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
         <label

@@ -10,6 +10,7 @@ import {
 import { IncomeSourceList } from '@/features/income-sources/IncomeSourceList';
 import { InstalmentList } from '@/features/instalments/InstalmentList';
 import { PlanningScreen } from '@/features/planning/PlanningScreen';
+import { GeminiQuotaPanel } from '@/features/settings/GeminiQuotaPanel';
 import { PayslipImport } from '@/features/settings/PayslipImport';
 import { TelegramSettings } from '@/features/settings/TelegramSettings';
 import { useAuth } from '@/hooks/useAuth';
@@ -200,6 +201,14 @@ export function SettingsScreen() {
         </div>
 
         <TelegramSettings userId={user?.id} />
+
+        <div className="border-t border-[var(--color-divider)] pt-2">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.08em] text-[var(--color-text-secondary)]">
+            Uso de API
+          </h3>
+        </div>
+
+        <GeminiQuotaPanel userId={user?.id} />
 
         <button
           onClick={handleSignOut}

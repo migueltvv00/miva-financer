@@ -10,6 +10,36 @@ export interface Category {
   created_at: string;
 }
 
+export type PaymentMethod =
+  | 'cartao_refeicao'
+  | 'multibanco'
+  | 'mbway'
+  | 'numerario'
+  | 'credito'
+  | 'debito';
+
+export const PAYMENT_METHOD_OPTIONS: Array<{
+  value: PaymentMethod;
+  label: string;
+  emoji: string;
+}> = [
+  { value: 'cartao_refeicao', label: 'Cartão Refeição', emoji: '🍽️' },
+  { value: 'multibanco', label: 'Multibanco', emoji: '🏧' },
+  { value: 'mbway', label: 'MBWay', emoji: '📱' },
+  { value: 'numerario', label: 'Numerário', emoji: '💵' },
+  { value: 'credito', label: 'Crédito', emoji: '💳' },
+  { value: 'debito', label: 'Débito', emoji: '💳' },
+];
+
+export const PAYMENT_METHOD_SHORT_LABELS: Record<PaymentMethod, string> = {
+  cartao_refeicao: 'Refeição',
+  multibanco: 'MB',
+  mbway: 'MBWay',
+  numerario: 'Cash',
+  credito: 'Créd',
+  debito: 'Déb',
+};
+
 export interface Transaction {
   id: string;
   user_id: string;
@@ -27,6 +57,7 @@ export interface Transaction {
   recurrence_parent_id: string | null;
   created_at: string;
   updated_at: string;
+  payment_method: PaymentMethod | null;
 }
 
 export interface Budget {

@@ -160,8 +160,21 @@ function getRecordCandidates(payload: unknown): Record<string, unknown>[] {
 }
 
 function getErrorMessage(value: unknown, fallback: string): string {
-  if (isRecord(value) && typeof value.error === 'string' && value.error.trim()) {
-    return value.error;
+  if (isRecord(value)) {
+    if (typeof value.error === 'string' && value.error.trim()) {
+      const detail = typeof value.detail === 'string' ? value.detail.trim() : '';
+      const status = typeof value.geminiStatus === 'number' ? value.geminiStatus : null;
+
+      if (detail && status) {
+        return `${value.error} (${status}): ${detail}`;
+      }
+
+      if (detail) {
+        return `${value.error}: ${detail}`;
+      }
+
+      return value.error;
+    }
   }
 
   if (typeof value === 'string' && value.trim()) {

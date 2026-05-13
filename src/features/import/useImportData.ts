@@ -165,6 +165,7 @@ export function useImportData(
           recurrence_parent_id: null,
           created_at: timestamp,
           updated_at: timestamp,
+          payment_method: null,
         }));
 
         const { error: insertError } = await supabase.from('transactions').insert(rows);

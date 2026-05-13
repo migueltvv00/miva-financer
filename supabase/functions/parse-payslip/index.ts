@@ -10,7 +10,7 @@ const corsHeaders = {
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 const VALIDATION_TOLERANCE_CENTS = 10;
-const GEMINI_MODEL = "gemini-2.0-flash-lite";
+const GEMINI_MODEL = "gemini-3.1-flash-lite";
 const EXTRACTION_PROMPT = `This is a Portuguese payslip (recibo de vencimento).
 Extract the following and respond ONLY with valid JSON, no markdown, no extra text:
 {
@@ -68,6 +68,10 @@ interface GeminiResponse {
       }>;
     };
   }>;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    candidatesTokenCount?: number;
+  };
   error?: {
     message?: string;
   };
@@ -320,7 +324,11 @@ Deno.serve(async (req: Request) => {
     const fileBase64 = bytesToBase64(fileBytes);
     const force = parseForceFlag(formData.get("force"));
 
-    log("gemini", "start", userId, { duration_ms: 0, model: GEMINI_MODEL });
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    log("gemini", "start", userId, { model: GEMINI_MODEL, file_size_bytes: fileBytes.length });
     const geminiStartedAt = Date.now();
 
     let geminiPayload: GeminiResponse;
@@ -362,21 +370,44 @@ Deno.serve(async (req: Request) => {
         log("gemini", "error", userId, {
           duration_ms: durationMs,
           status_code: geminiResponse.status,
+          model: GEMINI_MODEL,
           error_preview: errorBody.slice(0, 500),
         });
-        return jsonResponse({ error: "Failed to extract payslip data" }, 502);
+        return jsonResponse({
+          error: "Gemini extraction failed",
+          geminiStatus: geminiResponse.status,
+          detail: errorBody.slice(0, 200),
+        }, 502);
       }
 
       geminiPayload = (await geminiResponse.json()) as GeminiResponse;
       geminiText = extractGeminiText(geminiPayload);
       log("gemini", "ok", userId, { duration_ms: durationMs, model: GEMINI_MODEL });
+
+      // Fire-and-forget usage tracking
+      try {
+        await supabase.from("gemini_usage").insert({
+          user_id: userId,
+          model: GEMINI_MODEL,
+          fn_name: "parse-payslip",
+          date: new Date().toISOString().slice(0, 10),
+          tokens_in: geminiPayload.usageMetadata?.promptTokenCount ?? 0,
+          tokens_out: geminiPayload.usageMetadata?.candidatesTokenCount ?? 0,
+        });
+      } catch {
+        // Never let tracking failure affect the main flow
+      }
     } catch (error) {
       const durationMs = Date.now() - geminiStartedAt;
       log("gemini", "error", userId, {
         duration_ms: durationMs,
+        model: GEMINI_MODEL,
         message: error instanceof Error ? error.message : String(error),
       });
-      return jsonResponse({ error: "Failed to extract payslip data" }, 502);
+      return jsonResponse({
+        error: "Gemini extraction failed",
+        detail: error instanceof Error ? error.message : String(error),
+      }, 502);
     }
 
     let extracted: ExtractedPayslip;
@@ -403,13 +434,6 @@ Deno.serve(async (req: Request) => {
 
     log("validation", needsReview ? "needs_review" : "ok", userId, {
       delta_cents: validation.deltaCents,
-    });
-
-    const supabase = createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
     });
 
     const monthDate = `${extracted.month}-01`;
