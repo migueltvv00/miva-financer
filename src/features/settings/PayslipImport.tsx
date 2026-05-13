@@ -54,6 +54,26 @@ interface ExtractedPayslipData {
   deltaCents: number;
 }
 
+interface PayslipJsonInput {
+  month: string;
+  gross_salary_cents: number;
+  net_salary_cents: number;
+  irs_withheld_cents: number;
+  ss_withheld_cents: number;
+  other_deductions_cents?: number;
+  meal_card_cents?: number;
+  total_gross_cents?: number;
+  employer_name?: string;
+}
+
+const PAYSLIP_JSON_REQUIRED_KEYS: readonly (keyof PayslipJsonInput)[] = [
+  'month',
+  'gross_salary_cents',
+  'net_salary_cents',
+  'irs_withheld_cents',
+  'ss_withheld_cents',
+];
+
 interface PayslipImportHistoryItem {
   id: string;
   month: string;
@@ -514,6 +534,122 @@ export function PayslipImport({ userId }: PayslipImportProps) {
     [clearSelectedFile, getAccessToken, userId]
   );
 
+  const processJsonPayslip = useCallback(
+    async (file: File) => {
+      if (!userId) {
+        setError('Sessão indisponível. Tente novamente.');
+        return;
+      }
+
+      setError(null);
+      setFeedback(null);
+      setDuplicateState(null);
+      setPendingFile(file);
+      setPhase('loading');
+
+      try {
+        const text = await file.text();
+        const parsed: unknown = JSON.parse(text);
+
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          throw new Error('O ficheiro JSON deve conter um objecto com os campos do recibo.');
+        }
+
+        const record = parsed as Record<string, unknown>;
+
+        for (const key of PAYSLIP_JSON_REQUIRED_KEYS) {
+          if (!(key in record)) {
+            throw new Error(`Campo obrigatório em falta: "${key}".`);
+          }
+        }
+
+        if (typeof record.month !== 'string' || !/^\d{4}-\d{2}$/.test(record.month)) {
+          throw new Error('O campo "month" deve estar no formato "YYYY-MM" (ex: "2025-05").');
+        }
+
+        const jsonInput: PayslipJsonInput = {
+          month: record.month as string,
+          gross_salary_cents: Number(record.gross_salary_cents),
+          net_salary_cents: Number(record.net_salary_cents),
+          irs_withheld_cents: Number(record.irs_withheld_cents),
+          ss_withheld_cents: Number(record.ss_withheld_cents),
+          other_deductions_cents: Number(record.other_deductions_cents ?? 0),
+          meal_card_cents: record.meal_card_cents != null ? Number(record.meal_card_cents) : undefined,
+          total_gross_cents: record.total_gross_cents != null ? Number(record.total_gross_cents) : undefined,
+          employer_name: typeof record.employer_name === 'string' ? record.employer_name : undefined,
+        };
+
+        const numericFields = [
+          'gross_salary_cents', 'net_salary_cents', 'irs_withheld_cents', 'ss_withheld_cents',
+        ] as const;
+        for (const field of numericFields) {
+          if (!Number.isFinite(jsonInput[field]) || jsonInput[field] < 0) {
+            throw new Error(`O campo "${field}" deve ser um número inteiro positivo (cêntimos).`);
+          }
+        }
+
+        const { data: insertData, error: insertError } = await supabase
+          .from('payslip_imports')
+          .insert({
+            user_id: userId,
+            filename: file.name,
+            month: `${jsonInput.month}-01`,
+            gross_salary_cents: jsonInput.gross_salary_cents,
+            irs_withheld_cents: jsonInput.irs_withheld_cents,
+            ss_withheld_cents: jsonInput.ss_withheld_cents,
+            other_deductions_cents: jsonInput.other_deductions_cents ?? 0,
+            net_salary_cents: jsonInput.net_salary_cents,
+            meal_card_cents: jsonInput.meal_card_cents ?? null,
+            total_gross_cents: jsonInput.total_gross_cents ?? null,
+            employer_name: jsonInput.employer_name ?? null,
+            raw_gemini_response: { source: 'json_manual', input: jsonInput },
+            source: 'json',
+            status: 'pending',
+          })
+          .select('id')
+          .single();
+
+        if (insertError) {
+          throw new Error('Erro ao guardar os dados do recibo.');
+        }
+
+        const deltaCents =
+          jsonInput.gross_salary_cents -
+          jsonInput.irs_withheld_cents -
+          jsonInput.ss_withheld_cents -
+          (jsonInput.other_deductions_cents ?? 0) -
+          jsonInput.net_salary_cents;
+
+        setExtractedData({
+          payslip_import_id: insertData.id as string,
+          month: jsonInput.month,
+          gross_salary_cents: jsonInput.gross_salary_cents,
+          irs_withheld_cents: jsonInput.irs_withheld_cents,
+          ss_withheld_cents: jsonInput.ss_withheld_cents,
+          other_deductions_cents: jsonInput.other_deductions_cents ?? 0,
+          net_salary_cents: jsonInput.net_salary_cents,
+          meal_card_cents: jsonInput.meal_card_cents ?? null,
+          total_gross_cents: jsonInput.total_gross_cents ?? null,
+          employer_name: jsonInput.employer_name ?? null,
+          needsReview: deltaCents !== 0,
+          deltaCents,
+        });
+        setPhase('review');
+
+        console.log('[Fluxo:Payslip] JSON import success', { id: insertData.id });
+      } catch (jsonError) {
+        console.error('Erro ao processar JSON do recibo:', jsonError);
+        setError(
+          jsonError instanceof Error
+            ? jsonError.message
+            : 'Não foi possível processar o ficheiro JSON.'
+        );
+        setPhase('upload');
+      }
+    },
+    [userId]
+  );
+
   useEffect(() => {
     if (!userId) {
       setPhase('upload');
@@ -583,22 +719,27 @@ export function PayslipImport({ userId }: PayslipImportProps) {
       }
 
       const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json');
 
-      if (!isPdf) {
-        setError('Selecione um ficheiro PDF válido.');
+      if (!isPdf && !isJson) {
+        setError('Selecione um ficheiro PDF ou JSON válido.');
         clearSelectedFile();
         return;
       }
 
       if (file.size > MAX_FILE_SIZE_BYTES) {
-        setError('O recibo tem de ter no máximo 10MB.');
+        setError('O ficheiro tem de ter no máximo 10MB.');
         clearSelectedFile();
         return;
       }
 
-      await uploadPayslip(file, options);
+      if (isJson) {
+        await processJsonPayslip(file);
+      } else {
+        await uploadPayslip(file, options);
+      }
     },
-    [clearSelectedFile, uploadPayslip]
+    [clearSelectedFile, processJsonPayslip, uploadPayslip]
   );
 
   const handleFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -747,7 +888,7 @@ export function PayslipImport({ userId }: PayslipImportProps) {
             Importar recibo de vencimento
           </h3>
           <p className="text-sm text-[var(--color-text-secondary)]">
-            Envie um PDF para extrair os valores do salário e criar as transações automaticamente.
+            Envie um PDF para extrair os valores automaticamente, ou um JSON com os dados preenchidos manualmente.
           </p>
         </div>
 
@@ -782,7 +923,7 @@ export function PayslipImport({ userId }: PayslipImportProps) {
                 ref={fileInputRef}
                 id="payslip-file-input"
                 type="file"
-                accept=".pdf,application/pdf"
+                accept=".pdf,.json,application/pdf,application/json"
                 className="hidden"
                 onChange={(event) => {
                   void handleFileChange(event);
@@ -824,7 +965,7 @@ export function PayslipImport({ userId }: PayslipImportProps) {
                     </span>
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-[var(--color-text)]">
-                        Arrasta ou clica para enviar o recibo (PDF, máx. 10MB)
+                        Arrasta ou clica para enviar o recibo (PDF ou JSON, máx. 10MB)
                       </p>
                       <p className="text-xs text-[var(--color-text-secondary)]">
                         Os dados serão validados antes da importação.
