@@ -618,7 +618,116 @@ export function TelegramSettings({ userId }: TelegramSettingsProps) {
             </div>
           </div>
         )}
+
+        <TelegramDebugPanel />
       </div>
     </section>
+  );
+}
+
+interface DebugLogEntry {
+  ts: string;
+  op: string;
+  status: string;
+  detail?: string;
+}
+
+const debugLogBuffer: DebugLogEntry[] = [];
+
+function addDebugLog(op: string, status: string, detail?: Record<string, unknown>) {
+  debugLogBuffer.unshift({
+    ts: new Date().toISOString(),
+    op,
+    status,
+    detail: detail ? JSON.stringify(detail) : undefined,
+  });
+  if (debugLogBuffer.length > 20) {
+    debugLogBuffer.pop();
+  }
+}
+
+// Hook into console.log for [Fluxo:Telegram] entries
+const originalConsoleLog = console.log;
+console.log = (...args: unknown[]) => {
+  originalConsoleLog(...args);
+  if (typeof args[0] === 'string' && args[0].startsWith('[Fluxo:Telegram]')) {
+    const parts = (args[0] as string).replace('[Fluxo:Telegram] ', '').split(' ');
+    addDebugLog(
+      parts[0] ?? 'unknown',
+      parts[1] ?? 'info',
+      args[1] && typeof args[1] === 'object' ? (args[1] as Record<string, unknown>) : undefined
+    );
+  }
+};
+
+function TelegramDebugPanel() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [, setTick] = useState(0);
+
+  const refresh = () => setTick((t) => t + 1);
+
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg-tertiary)]">
+      <button
+        type="button"
+        onClick={() => {
+          setIsOpen(!isOpen);
+          refresh();
+        }}
+        className="flex min-h-[44px] w-full items-center justify-between px-3 py-2 text-sm font-medium text-[var(--color-text-secondary)]"
+      >
+        <span>🔍 Telegram Debug</span>
+        <span>{isOpen ? '▲' : '▼'}</span>
+      </button>
+      {isOpen && (
+        <div className="border-t border-[var(--color-border)] px-3 py-2">
+          <div className="mb-2 flex justify-end">
+            <button
+              type="button"
+              onClick={refresh}
+              className="rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]"
+            >
+              Atualizar
+            </button>
+          </div>
+          {debugLogBuffer.length === 0 ? (
+            <p className="py-4 text-center text-xs text-[var(--color-text-tertiary)]">
+              Sem entradas. Interage com o bot para ver logs.
+            </p>
+          ) : (
+            <div className="max-h-60 space-y-1 overflow-y-auto">
+              {debugLogBuffer.map((entry) => (
+                <div
+                  key={`${entry.ts}-${entry.op}`}
+                  className="rounded-[var(--radius-sm)] bg-[var(--color-bg)] px-2 py-1 font-mono text-xs"
+                >
+                  <span className="text-[var(--color-text-tertiary)]">
+                    {new Date(entry.ts).toLocaleTimeString('pt-PT')}
+                  </span>{' '}
+                  <span className="font-semibold text-[var(--color-text)]">{entry.op}</span>{' '}
+                  <span
+                    className={
+                      entry.status === 'error'
+                        ? 'text-[var(--color-danger)]'
+                        : entry.status === 'success'
+                          ? 'text-[var(--color-success)]'
+                          : 'text-[var(--color-text-secondary)]'
+                    }
+                  >
+                    {entry.status}
+                  </span>
+                  {entry.detail && (
+                    <span className="ml-1 text-[var(--color-text-tertiary)]">{entry.detail}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <p className="mt-2 text-xs text-[var(--color-text-tertiary)]">
+            Logs do servidor: Supabase Dashboard → Edge Functions → Logs
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
