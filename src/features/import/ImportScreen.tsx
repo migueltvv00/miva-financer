@@ -12,7 +12,7 @@ import {
   useImportData,
   type ImportTransactionInput,
 } from '@/features/import/useImportData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { getCategorySuggestion } from '@/hooks/useCategorySuggestion';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';

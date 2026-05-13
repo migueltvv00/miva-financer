@@ -17,7 +17,7 @@ import {
   type EditTransactionFormValues,
 } from '@/features/transactions/EditTransactionModal';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { getRecurringOccurrenceDate } from '@/lib/recurringEngine';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';

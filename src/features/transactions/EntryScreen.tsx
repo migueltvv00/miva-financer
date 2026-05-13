@@ -5,7 +5,7 @@ import { NumPad } from '@/components/NumPad';
 import { useCategoryData } from '@/features/categories/useCategoryData';
 import { IncomeSourceSelector } from '@/features/income-sources/IncomeSourceSelector';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { useCategorySuggestion } from '@/hooks/useCategorySuggestion';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { addToQueue, flushQueue } from '@/lib/offlineQueue';

@@ -9,7 +9,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatCents } from '@/lib/utils';
 import { useNetWorthData } from './useNetWorthData';
 

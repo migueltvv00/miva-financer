@@ -8,7 +8,7 @@ import {
   type CategoryTrend,
 } from '@/features/trends/trendUtils';
 import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
 import { useTransactionStore } from '@/store/transactionStore';

@@ -25,7 +25,7 @@ import type { MonthlyReportProps } from '@/features/reports/MonthlyReport';
 import { computeCategoryTrends } from '@/features/trends/trendUtils';
 import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';

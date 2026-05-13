@@ -13,7 +13,7 @@ import { PlanningScreen } from '@/features/planning/PlanningScreen';
 import { GeminiQuotaPanel } from '@/features/settings/GeminiQuotaPanel';
 import { PayslipImport } from '@/features/settings/PayslipImport';
 import { TelegramSettings } from '@/features/settings/TelegramSettings';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 
 function formatImportSessionDate(dateValue: string) {
   return new Intl.DateTimeFormat('pt-PT', {

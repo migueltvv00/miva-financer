@@ -12,7 +12,7 @@ import {
   toLocalDate,
 } from '@/features/goals/utils';
 import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 import { formatCents } from '@/lib/utils';
 import type { SavingsGoal } from '@/types';
 

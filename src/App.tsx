@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import { useAuth } from '@/hooks/useAuth';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { AppLayout } from '@/components/AppLayout';
 import { AuthScreen } from '@/features/auth/AuthScreen';
 import { EntryScreen } from '@/features/transactions/EntryScreen';
@@ -13,7 +13,6 @@ import { SettingsScreen } from '@/features/settings/SettingsScreen';
 import { ImportScreen } from '@/features/import/ImportScreen';
 import { TrendsScreen } from '@/features/trends/TrendsScreen';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
-import { supabase } from '@/lib/supabase';
 
 function AuthLoadingScreen() {
   return (
@@ -93,55 +92,37 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        return;
-      }
-
-      void supabase.auth.getSession().then(({ error }) => {
-        if (error) {
-          console.error('Erro ao revalidar sessão:', error);
-        }
-      });
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route
-          path="/login"
-          element={
-            <PublicRoute>
-              <AuthScreen />
-            </PublicRoute>
-          }
-        />
-        <Route
-          element={
-            <ProtectedRoute>
-              <AppLayout />
-            </ProtectedRoute>
-          }
-        >
-          <Route index element={<EntryScreen />} />
-          <Route path="transacoes" element={<TransactionListScreen />} />
-          <Route path="resumo" element={<DashboardScreen />} />
-          <Route path="tendencias" element={<TrendsScreen />} />
-          <Route path="objetivos" element={<GoalsScreen />} />
-          <Route path="patrimonio" element={<NetWorthScreen />} />
-          <Route path="investimentos" element={<InvestmentScreen />} />
-          <Route path="importar" element={<ImportScreen />} />
-          <Route path="definicoes" element={<SettingsScreen />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <AuthScreen />
+              </PublicRoute>
+            }
+          />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<EntryScreen />} />
+            <Route path="transacoes" element={<TransactionListScreen />} />
+            <Route path="resumo" element={<DashboardScreen />} />
+            <Route path="tendencias" element={<TrendsScreen />} />
+            <Route path="objetivos" element={<GoalsScreen />} />
+            <Route path="patrimonio" element={<NetWorthScreen />} />
+            <Route path="investimentos" element={<InvestmentScreen />} />
+            <Route path="importar" element={<ImportScreen />} />
+            <Route path="definicoes" element={<SettingsScreen />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
