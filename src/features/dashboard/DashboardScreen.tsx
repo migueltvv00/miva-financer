@@ -12,6 +12,7 @@ import {
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
 import { MealCardWidget } from '@/features/dashboard/MealCardWidget';
+import { PaymentMethodChart } from '@/features/dashboard/PaymentMethodChart';
 import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
 import { useIncomeSourceData } from '@/features/income-sources/useIncomeSourceData';
 import { INCOME_SOURCE_TYPE_LABELS } from '@/features/income-sources/constants';
@@ -948,6 +949,13 @@ export function DashboardScreen() {
                 ))}
               </div>
             )}
+          </SectionCard>
+
+          <SectionCard
+            title="Despesas por método de pagamento"
+            description="Análise da distribuição das despesas por forma de pagamento."
+          >
+            <PaymentMethodChart transactions={transactions} />
           </SectionCard>
 
           {hasFreelanceSources && (
