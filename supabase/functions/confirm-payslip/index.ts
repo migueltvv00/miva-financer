@@ -282,6 +282,41 @@ Deno.serve(async (req: Request) => {
     .update({ status: "done" })
     .eq("id", payslip.id);
 
+  // Upsert monthly plan with net salary as expected income
+  const monthDate = `${payslip.month}-01`;
+  try {
+    const { data: existingPlan } = await supabase
+      .from("monthly_plans")
+      .select("id, expected_income_cents")
+      .eq("user_id", userId)
+      .eq("month", monthDate)
+      .maybeSingle();
+
+    if (existingPlan) {
+      await supabase
+        .from("monthly_plans")
+        .update({
+          expected_income_cents: payslip.net_salary_cents,
+        })
+        .eq("id", existingPlan.id);
+    } else {
+      await supabase.from("monthly_plans").insert({
+        user_id: userId,
+        month: monthDate,
+        expected_income_cents: payslip.net_salary_cents,
+      });
+    }
+
+    log("confirm", "monthly_plan_updated", userId, {
+      month: monthDate,
+      expected_income_cents: payslip.net_salary_cents,
+    });
+  } catch (planError) {
+    log("confirm", "monthly_plan_error", userId, {
+      error: String(planError),
+    });
+  }
+
   log("confirm", "success", userId, {
     transaction_count: createdTx?.length ?? 0,
     payslip_import_id: payslip.id,

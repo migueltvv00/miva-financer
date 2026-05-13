@@ -654,57 +654,8 @@ export function PayslipImport({ userId }: PayslipImportProps) {
       await fetchImports();
       setFeedback({
         type: 'success',
-        message: `✅ ${createdTransactions} transações criadas para ${importedMonth}\n💰 Rendimento de ${netFormatted} registado`,
+        message: `✅ ${createdTransactions} transações criadas para ${importedMonth}\n💰 Rendimento líquido de ${netFormatted} registado no plano mensal`,
       });
-
-      try {
-        const payslipMonth = extractedData.month;
-        const monthDate = `${payslipMonth}-01`;
-
-        if (userId) {
-          const { data: incomeCats, error: incomeCatsError } = await supabase
-            .from('categories')
-            .select('id')
-            .eq('user_id', userId)
-            .eq('type', 'income')
-            .ilike('name', '%sal%rio%')
-            .limit(1);
-
-          if (incomeCatsError) {
-            throw incomeCatsError;
-          }
-
-          const salaryCatId = incomeCats?.[0]?.id;
-          if (salaryCatId) {
-            const { data: existingBudget, error: existingBudgetError } = await supabase
-              .from('budgets')
-              .select('id, limit_cents')
-              .eq('user_id', userId)
-              .eq('category_id', salaryCatId)
-              .eq('month', monthDate)
-              .maybeSingle();
-
-            if (existingBudgetError) {
-              throw existingBudgetError;
-            }
-
-            if (!existingBudget) {
-              const { error: insertBudgetError } = await supabase.from('budgets').insert({
-                user_id: userId,
-                category_id: salaryCatId,
-                month: monthDate,
-                limit_cents: extractedData.net_salary_cents,
-              });
-
-              if (insertBudgetError) {
-                throw insertBudgetError;
-              }
-            }
-          }
-        }
-      } catch (budgetError) {
-        console.error('Budget auto-fill error:', budgetError);
-      }
 
       setExtractedData(null);
       setPendingFile(null);

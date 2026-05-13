@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { seedDefaultCategories } from '@/lib/seedCategories';
@@ -17,6 +17,8 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const AUTH_LOADING_TIMEOUT_MS = 8_000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -24,13 +26,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isLoading: true,
   });
   const seededRef = useRef<string | null>(null);
+  const resolvedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
-    let authEventHandled = false;
 
     const setAuthState = (session: Session | null) => {
       if (cancelled) return;
+      resolvedRef.current = true;
       setState({
         user: session?.user ?? null,
         session,
@@ -38,15 +41,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
     };
 
+    // Safety timeout — if auth doesn't resolve, unblock the app
+    const timeout = window.setTimeout(() => {
+      if (!resolvedRef.current && !cancelled) {
+        console.warn('[AuthProvider] Auth resolution timed out — forcing isLoading=false');
+        setState((prev) => (prev.isLoading ? { ...prev, isLoading: false } : prev));
+      }
+    }, AUTH_LOADING_TIMEOUT_MS);
+
     async function initSession() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (cancelled || authEventHandled) return;
+        if (cancelled || resolvedRef.current) return;
 
         if (session) {
           const { data: { session: refreshed }, error } =
             await supabase.auth.refreshSession();
-          if (cancelled || authEventHandled) return;
+          if (cancelled || resolvedRef.current) return;
 
           if (error || !refreshed) {
             console.warn('Sessão expirada, será necessário autenticar novamente.');
@@ -58,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setAuthState(null);
         }
       } catch {
-        if (!authEventHandled) setAuthState(null);
+        if (!resolvedRef.current) setAuthState(null);
       }
     }
 
@@ -67,7 +78,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (cancelled) return;
-        authEventHandled = true;
 
         if (event === 'TOKEN_REFRESHED' && !session) {
           console.warn('Token refresh resulted in null session — treating as signed out.');
@@ -92,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
       subscription.unsubscribe();
     };
   }, []);
@@ -122,8 +133,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   }, []);
 
+  // Memoize context value to prevent unnecessary consumer re-renders
+  const value = useMemo<AuthContextValue>(
+    () => ({ ...state, signUp, signIn, signOut }),
+    [state, signUp, signIn, signOut]
+  );
+
   return (
-    <AuthContext.Provider value={{ ...state, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
