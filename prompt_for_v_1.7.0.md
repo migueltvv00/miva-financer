@@ -24,26 +24,33 @@ strictly required by the above.
 <tech_stack>
 Defined in copilot-instructions.md. No new libraries this version.
 
-GEMINI MODEL STRATEGY (two different models, two different jobs):
+GEMINI FREE-TIER LANDSCAPE (confirmed limits, May 2026):
+  gemini-2.5-flash:      5 RPM,  250K TPM,   20 RPD  ← the wall we kept hitting
+  gemini-2.5-flash-lite: 10 RPM, 250K TPM,   20 RPD  ← same RPD wall, skip
+  gemini-2.0-flash:      dead (0/0/0), do not use
+  gemini-2.0-flash-lite: not multimodal-capable for PDF
+  gemini-3.1-flash-lite: 15 RPM, 250K TPM,  500 RPD  ← correct choice
+  gemma-4-27b / 31b:     15 RPM, unlimited, 1500 RPD  ← open model, backup
 
-1. Text/NLP tasks (Telegram bot NL parsing): gemini-2.0-flash-lite
-   — fast, cheap, text-only, already working.
+GEMINI MODEL STRATEGY — ONE MODEL FOR EVERYTHING:
+Use gemini-3.1-flash-lite for all tasks: NL transaction parsing,
+payslip PDF extraction, and any future Gemini calls.
+Reason: highest free-tier RPD (500 vs 20), fast, supports both
+text and multimodal (PDF inline_data), built for structured
+extraction tasks — exactly Fluxo's workload.
 
-2. Multimodal/PDF tasks (payslip parsing): gemini-1.5-flash
-   — proven multimodal support, handles PDF inline_data reliably.
-   The lite variant lacks full multimodal capabilities.
+Single constant in every Edge Function that calls Gemini:
+  const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
-Model constants: define two named constants instead of one, both
-in a shared config at the top of each Edge Function:
-  GEMINI_TEXT_MODEL  = "gemini-2.0-flash-lite"
-  GEMINI_PDF_MODEL   = "gemini-1.5-flash"
+Safe operating limits (80–90% of free quota):
+  RPM_SAFE  = 12   (80% of 15 RPM)
+  RPD_SAFE  = 450  (90% of 500 RPD)
+  TPM_SAFE  = none needed (250K/min is never a concern for this app)
 
-Rate limits reference (free tier):
-  gemini-2.0-flash-lite: 30 RPM, 1500 RPD, 1M TPM
-  gemini-1.5-flash:      15 RPM, 1500 RPD, 1M TPM
+Update any existing env vars or hardcoded limits to these values.
 
-PDF via Gemini 1.5 Flash — use the REST inline_data pattern:
-  POST https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={KEY}
+PDF via gemini-3.1-flash-lite — REST inline_data pattern:
+  POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={KEY}
   Body:
   {
     "contents": [{
@@ -54,8 +61,9 @@ PDF via Gemini 1.5 Flash — use the REST inline_data pattern:
     }],
     "generationConfig": { "responseMimeType": "application/json" }
   }
-Use context7 to verify the exact REST API pattern for gemini-1.5-flash
-before implementing. Do not assume it is identical to prior versions.
+Use context7 to verify the exact REST API pattern for
+gemini-3.1-flash-lite before implementing. Confirm PDF inline_data
+is supported by checking the model's capability list in the docs.
 </tech_stack>
 
 <debugging_guide>
@@ -132,14 +140,19 @@ Root cause diagnosis (do this first, before any code changes):
    Gemini API error message and HTTP status code.
    Document the finding in the PR description.
 
-2. The most likely cause: gemini-2.0-flash-lite does not accept
-   application/pdf in inline_data. Gemini API returns 400 with
-   "Request contains an invalid argument" or similar.
+2. Two likely root causes (both must be fixed):
+   a. Wrong model string: the agent implemented "gemini-2.0-flash-lite"
+      instead of "gemini-3.1-flash-lite". The 2.0-lite variant may
+      not support PDF inline_data multimodal input.
+   b. RPD exhaustion: if the app had been using gemini-2.5-flash
+      (20 RPD limit), the quota was likely hit, causing all Gemini
+      calls to fail with 429.
 
 Fix:
-1. In parse-payslip/index.ts: change the GEMINI_MODEL constant
-   to "gemini-1.5-flash" (dedicated constant GEMINI_PDF_MODEL).
-   Update the fetch URL accordingly.
+1. In parse-payslip/index.ts AND telegram-webhook/index.ts:
+   change every Gemini model string to "gemini-3.1-flash-lite".
+   Verify there are no other model references in the codebase
+   (grep for "gemini-" across all files).
 
 2. Improve the error response: when Gemini returns non-200,
    include the HTTP status code and a truncated error preview in
@@ -155,8 +168,8 @@ Fix:
 3. Update PayslipImport.tsx to render the new detailed error
    when present.
 
-4. Add a pre-call model validation: log the model name at every
-   Gemini call start so it is always visible in logs.
+4. Log the model name at every Gemini call start so it is always
+   visible in Supabase logs for future debugging.
 
 Verification gate for Part A:
 - Upload a real Portuguese payslip PDF.
@@ -206,12 +219,12 @@ Returns:
     { date: "YYYY-MM-DD", requests: number, tokens: number }
   ],
   limits: {
-    text_model: { name: string, rpm: number, rpd: number },
-    pdf_model:  { name: string, rpm: number, rpd: number }
+    model: { name: string, rpm: number, rpd: number, tpm: number }
   }
 }
 Implementation: single SQL query grouped by date, last 7 rows,
-ordered DESC. Return limits as hardcoded constants.
+ordered DESC. Return limits as hardcoded constants matching
+gemini-3.1-flash-lite free tier (rpm: 15, rpd: 500, tpm: 250000).
 
 Frontend — Settings debug panel extension:
 Extend the existing TelegramDebugPanel (or add a sibling
@@ -220,13 +233,12 @@ GeminiQuotaPanel component) in Settings:
 Section title: "Uso Gemini"
 Content:
   Hoje: {N} pedidos  /  {tokens_in + tokens_out} tokens
-  Limite diário: 1500 pedidos (modelos: gemini-2.0-flash-lite,
-                                        gemini-1.5-flash)
+  Limite diário: 500 pedidos (gemini-3.1-flash-lite)
   Mini gráfico de barras (7 dias): sparkline using existing
   Recharts dependency — BarChart with 7 bars, x=date label
   (e.g., "Seg", "Ter"), y=request count.
-  If today's requests ≥ 1350 (90% of limit): show yellow warning.
-  If today's requests ≥ 1500: show red warning "Limite atingido".
+  If today's requests ≥ 450 (90% of limit): show yellow warning.
+  If today's requests ≥ 500: show red warning "Limite atingido".
 
 Fetch on mount (not realtime). Manual refresh button.
 Show loading skeleton while fetching.
@@ -239,10 +251,10 @@ overhead needed since we're already server-side — query the DB
 directly from the webhook handler).
 Reply message format:
   📊 *Uso Gemini hoje*
-  Pedidos: {N} / 1500
+  Pedidos: {N} / 500
   Tokens: {total}
   [Barra de progresso visual: ████░░░░░░]
-  Modelos: gemini-2.0-flash-lite · gemini-1.5-flash
+  Modelo: gemini-3.1-flash-lite
   _Actualizado: {HH:MM}_
 
 Helper function for the progress bar:
@@ -437,9 +449,9 @@ After all PRs merged and tests pass:
     git commit --allow-empty -m "chore: v1.7 feature complete — cleanup begins"
 
 Cleanup additions specific to this version:
-  - Introduce GEMINI_TEXT_MODEL and GEMINI_PDF_MODEL as shared
-    constants imported at the top of each Edge Function that uses
-    Gemini — no more scattered literals.
+  - Consolidate GEMINI_MODEL into a single shared constant at the
+    top of each Edge Function — no scattered model strings anywhere.
+    Grep for "gemini-" after the cleanup to verify zero literals remain.
   - Consolidate gemini_usage insert into a shared helper function
     called from both telegram-webhook and parse-payslip.
   - PayslipImport.tsx: extract the upload area into a reusable
