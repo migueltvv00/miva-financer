@@ -180,24 +180,180 @@ src/
 - ✅ AuthContext singleton — eliminates session loss on navigation
 - ✅ Payslip net salary auto-fills `monthly_plans.expected_income_cents` (visible in Planning)
 - ✅ JSON Plan B — import payslip data via JSON file when PDF extraction fails
+- ✅ Net worth registry — auto-sync from goals & investments
+- ✅ Meal card budget — separate tracking from payslip allowance
+- ✅ Architecture overhaul — lazy loading, code splitting, stale-while-revalidate caching
+- ✅ Transaction search — filter by note, category, or amount
+- ✅ Payment method analysis — bar chart breakdown on dashboard
+- ✅ Telegram /editar and /apagar — edit/delete transactions via bot
 
 ## Architecture
 
-### Data Flow
+### System Overview (Mermaid)
 
+```mermaid
+graph TB
+    subgraph Client["Browser (PWA)"]
+        React["React 18 + TS"]
+        Zustand["Zustand Stores"]
+        SW["Service Worker"]
+        Offline["Offline Queue"]
+    end
+
+    subgraph Supabase["Supabase Platform"]
+        Auth["Auth (JWT)"]
+        PG["Postgres + RLS"]
+        RT["Realtime (WebSocket)"]
+        EF["Edge Functions (Deno)"]
+    end
+
+    subgraph External["External Services"]
+        Gemini["Gemini 3.1 Flash Lite"]
+        TG["Telegram Bot API"]
+        Vercel["Vercel CDN"]
+    end
+
+    React --> Zustand
+    Zustand <-->|subscribe| RT
+    React -->|REST| PG
+    React -->|login/signup| Auth
+    SW --> Offline
+    Offline -->|flush on reconnect| PG
+    EF -->|structured extraction| Gemini
+    TG -->|webhook POST| EF
+    EF --> PG
+    Vercel -->|serve static| Client
 ```
-Browser (PWA)
-  ├─ React 18 + TypeScript
-  ├─ Zustand (state) ←──→ Supabase Realtime (subscriptions)
-  ├─ Supabase Client (REST) ──→ Supabase Postgres (RLS)
-  └─ Service Worker (Workbox) ──→ Offline queue (localStorage)
 
-Telegram Bot
-  └─ Webhook ──→ Supabase Edge Function ──→ Supabase Postgres
+### Data Flow (Mermaid)
 
-Payslip Import
-  └─ PDF upload ──→ parse-payslip Edge Function ──→ Gemini API ──→ confirm-payslip ──→ Transactions
-  └─ JSON upload ──→ Direct insert ──→ confirm-payslip ──→ Transactions
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant App as React App
+    participant Z as Zustand
+    participant SB as Supabase
+    participant RT as Realtime
+
+    U->>App: Add transaction
+    App->>Z: Optimistic update
+    Z-->>App: Re-render immediately
+    App->>SB: INSERT (REST)
+    SB-->>RT: Broadcast change
+    RT-->>Z: Sync confirmed state
+    
+    Note over App,SB: If offline, queue in localStorage
+    Note over SB,RT: RLS ensures user_id match
+```
+
+### Feature Module Map (Mermaid)
+
+```mermaid
+graph LR
+    subgraph Core["Core Modules"]
+        Auth["auth/"]
+        TX["transactions/"]
+        Cat["categories/"]
+    end
+
+    subgraph Finance["Financial"]
+        Budget["budgets/"]
+        Plan["planning/"]
+        Income["income-sources/"]
+        Install["instalments/"]
+    end
+
+    subgraph Wealth["Wealth Tracking"]
+        Goals["goals/"]
+        NW["net-worth/"]
+        Invest["investments/"]
+    end
+
+    subgraph Analysis["Analysis & Import"]
+        Dash["dashboard/"]
+        Trends["trends/"]
+        Import["import/"]
+        Reports["reports/"]
+    end
+
+    subgraph Bot["Telegram"]
+        Webhook["telegram-webhook"]
+        Digest["telegram-digest"]
+    end
+
+    TX --> Cat
+    Budget --> Cat
+    Plan --> Income
+    Goals -->|sync| NW
+    Invest -->|sync| NW
+    Dash --> TX
+    Dash --> Budget
+    Trends --> TX
+    Import --> TX
+    Webhook --> TX
+```
+
+### Core Architecture Decisions
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| State management | Zustand | Minimal boilerplate, works outside React, stale-while-revalidate trivial to implement |
+| Money storage | Integer cents | Eliminates floating-point rounding — `1234` = €12.34 always |
+| Backend | Supabase | RLS per user built-in, Realtime subscriptions, Edge Functions for server logic |
+| AI model | Gemini 3.1 Flash Lite | 500 RPD free tier, 15 RPM, fast structured extraction |
+| Auth | Supabase Auth (email) | Single provider, JWT tokens, session auto-refresh |
+| Offline | localStorage queue | Simple, reliable, auto-flush on reconnect |
+| Code splitting | React.lazy + Vite chunks | Initial load 325KB (was 1,189KB), each screen lazy |
+| Styling | Tailwind + CSS vars | Design tokens stay consistent, Tailwind for speed |
+| Telegram bot | Edge Function webhook | No server to maintain, scales to 0, deployed in <5s |
+| PDF/CSV | Client-side | No server cost, works offline, @react-pdf + papaparse |
+
+### Code Patterns
+
+**1. Stale-While-Revalidate (all data hooks)**
+```typescript
+// Only show loading spinner on first fetch (no cached data)
+const setLoading = store.getState().setLoading;
+if (store.getState().items.length === 0) setLoading(true);
+
+// Fetch in background, replace when done
+const { data } = await supabase.from('table').select('*')...
+store.getState().setItems(data);
+setLoading(false);
+```
+
+**2. Optimistic Updates (transactions, budgets)**
+```typescript
+const previous = store.getState().items;
+store.getState().setItems([...previous, optimisticItem]); // instant UI
+
+try {
+  await supabase.from('table').insert(item);
+} catch {
+  store.getState().setItems(previous); // rollback
+  showToast('Erro ao guardar');
+}
+```
+
+**3. Entity Store Factory (reusable pattern)**
+```typescript
+// src/lib/createEntityStore.ts
+const useStore = createEntityStore<Transaction>({
+  sortFn: (a, b) => b.date.localeCompare(a.date),
+});
+```
+
+**4. Supabase RLS (every table)**
+```sql
+CREATE POLICY "Users see own data" ON transactions
+  FOR ALL USING (auth.uid() = user_id);
+```
+
+**5. Telegram Conversation State Machine**
+```typescript
+// pendingTransactions Map tracks per-chatId state
+// States: idle → awaiting_category → awaiting_amount → awaiting_confirm
+// Each callback_data prefix routes to the right handler
 ```
 
 ### Zustand Stores (`src/store/`)

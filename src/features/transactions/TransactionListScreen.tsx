@@ -255,6 +255,7 @@ export function TransactionListScreen() {
   const [selectedMonth, setSelectedMonth] = useState(() => new Date());
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [openDeleteActionId, setOpenDeleteActionId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
   const [deleteScope, setDeleteScope] = useState<DeleteScope>(null);
@@ -296,6 +297,7 @@ export function TransactionListScreen() {
   const filteredTransactions = useMemo(() => {
     const activeCategoryIds = new Set(selectedCategoryIds);
     const activePaymentMethods = new Set(selectedPaymentMethods);
+    const query = searchQuery.toLowerCase().trim();
 
     return sortTransactions(transactions).filter((transaction) => {
       if (
@@ -312,9 +314,19 @@ export function TransactionListScreen() {
         return false;
       }
 
+      if (query) {
+        const note = (transaction.note ?? '').toLowerCase();
+        const cat = categoryMap.get(transaction.category_id);
+        const catName = (cat?.name ?? '').toLowerCase();
+        const amount = (transaction.amount_cents / 100).toFixed(2);
+        if (!note.includes(query) && !catName.includes(query) && !amount.includes(query)) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [selectedCategoryIds, selectedPaymentMethods, transactions]);
+  }, [selectedCategoryIds, selectedPaymentMethods, searchQuery, transactions, categoryMap]);
 
   const groupedTransactions = useMemo<TransactionGroup[]>(() => {
     const groups: TransactionGroup[] = [];
@@ -713,6 +725,29 @@ export function TransactionListScreen() {
               →
             </button>
           </div>
+        </div>
+
+        <div className="relative">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Pesquisar por nota, categoria ou valor…"
+            className="min-h-[44px] w-full rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] px-4 py-2 pl-10 text-sm text-[var(--color-text)] placeholder-[var(--color-text-tertiary)] shadow-[var(--shadow-sm)] outline-none focus:border-[var(--color-accent)]"
+          />
+          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]">
+            🔍
+          </span>
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-secondary)] hover:text-[var(--color-text)]"
+              aria-label="Limpar pesquisa"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         <div className="space-y-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-3 shadow-[var(--shadow-sm)]">

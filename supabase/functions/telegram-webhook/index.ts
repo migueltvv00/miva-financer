@@ -151,6 +151,13 @@ interface PendingTransaction {
   date: string;
   type: TransactionType;
   payment_method: PaymentMethod | null;
+  edit_state?: EditState;
+}
+
+interface EditState {
+  mode: "edit";
+  transaction_id: string;
+  field: string | null;
 }
 
 interface ParseTransactionResult {
@@ -249,6 +256,12 @@ async function handleMessage(message: TelegramMessage) {
       return;
     case "/receita":
       await handleManualTransactionCommand(chatId, userId, text, "income");
+      return;
+    case "/editar":
+      await handleEditarCommand(chatId, userId);
+      return;
+    case "/apagar":
+      await handleApagarCommand(chatId, userId);
       return;
     case "/cancelar":
       log("cmd_cancelar", "start", chatId);
@@ -362,6 +375,53 @@ async function handleCallbackQuery(callbackQuery: TelegramCallbackQuery) {
     if (data === "disconnect_cancel") {
       await answerCallbackQuery(callbackQuery.id, "Cancelado.");
       await safeEditMessage(chatIdKey, messageId, "Operação cancelada.");
+      return;
+    }
+
+    if (data.startsWith("edit:")) {
+      const transactionId = data.slice(5);
+      await answerCallbackQuery(callbackQuery.id, "Que campo pretende alterar?");
+      await handleEditSelectField(chatIdKey, messageId, transactionId);
+      return;
+    }
+
+    if (data.startsWith("editfield:")) {
+      const field = data.slice(10);
+      if (field === "cancel") {
+        await answerCallbackQuery(callbackQuery.id, "Cancelado.");
+        await setPendingTransaction(chatIdKey, null);
+        await safeEditMessage(chatIdKey, messageId, "❌ Edição cancelada.");
+        return;
+      }
+      await answerCallbackQuery(callbackQuery.id, "Escreve o novo valor.");
+      await handleEditFieldSelected(chatIdKey, messageId, field);
+      return;
+    }
+
+    if (data.startsWith("editcat:")) {
+      const categoryId = data.slice(8);
+      await answerCallbackQuery(callbackQuery.id, "A atualizar…");
+      await handleEditApplyCategory(chatIdKey, messageId, session.user_id, categoryId);
+      return;
+    }
+
+    if (data.startsWith("del:")) {
+      const transactionId = data.slice(4);
+      await answerCallbackQuery(callbackQuery.id, "Confirma a eliminação?");
+      await handleDeleteConfirmPrompt(chatIdKey, messageId, transactionId, session.user_id);
+      return;
+    }
+
+    if (data.startsWith("delconfirm:")) {
+      const transactionId = data.slice(11);
+      await answerCallbackQuery(callbackQuery.id, "A eliminar…");
+      await handleDeleteConfirm(chatIdKey, messageId, transactionId, session.user_id);
+      return;
+    }
+
+    if (data === "delcancel") {
+      await answerCallbackQuery(callbackQuery.id, "Cancelado.");
+      await safeEditMessage(chatIdKey, messageId, "❌ Eliminação cancelada.");
       return;
     }
 
@@ -568,13 +628,13 @@ async function handleUltimasCommand(chatId: string, userId: string) {
   log("cmd_ultimas", "start", chatId);
   const { data: transactionData, error } = await supabase
     .from("transactions")
-    .select("category_id, amount_cents, type, note, date")
+    .select("id, category_id, amount_cents, type, note, date")
     .eq("user_id", userId)
     .order("date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(5);
 
-  const transactions = (transactionData ?? []) as TransactionRecord[];
+  const transactions = (transactionData ?? []) as (TransactionRecord & { id: string })[];
 
   if (error) {
     log("cmd_ultimas", "error", chatId, { error: getErrorMessage(error) });
@@ -604,15 +664,22 @@ async function handleUltimasCommand(chatId: string, userId: string) {
   }
 
   const categoryMap = new Map((categories ?? []).map((category) => [category.id, category]));
-  const lines = transactions.map((transaction) => {
+  const lines = transactions.map((transaction, idx) => {
     const category = categoryMap.get(transaction.category_id);
     const label = category ? `${category.emoji} ${category.name}` : "Categoria";
     const detail = transaction.note ? ` · ${transaction.note}` : "";
     const prefix = transaction.type === "income" ? "💰" : "💸";
-    return `${formatDate(transaction.date)} · ${prefix} ${formatCents(transaction.amount_cents)} · ${label}${detail}`;
+    return `${idx + 1}. ${formatDate(transaction.date)} · ${prefix} ${formatCents(transaction.amount_cents)} · ${label}${detail}`;
   });
 
-  await sendMessage(chatId, `🧾 Últimas 5 transações\n\n${lines.join("\n")}`);
+  const keyboard = {
+    inline_keyboard: transactions.map((tx, idx) => [
+      { text: `✏️ ${idx + 1}`, callback_data: `edit:${tx.id}` },
+      { text: `🗑️ ${idx + 1}`, callback_data: `del:${tx.id}` },
+    ]),
+  };
+
+  await sendMessage(chatId, `🧾 Últimas 5 transações\n\n${lines.join("\n")}`, keyboard);
   log("cmd_ultimas", "success", chatId, { transaction_count: transactions.length });
 }
 
@@ -763,6 +830,13 @@ async function handleManualTransactionCommand(
 }
 
 async function handleFreeTextMessage(chatId: string, userId: string, text: string) {
+  const pending = await getPendingTransaction(chatId);
+
+  if (pending?.edit_state?.mode === "edit" && pending.edit_state.field) {
+    await handleEditApplyValue(chatId, userId, pending.edit_state, text);
+    return;
+  }
+
   const { parsed, rateLimited } = await parseTransactionMessage(chatId, text, userId);
 
   if (rateLimited) {
@@ -1026,7 +1100,7 @@ function buildConfirmationKeyboard(selectedPaymentMethod: PaymentMethod | null) 
   };
 }
 
-function buildCategoryKeyboard(categories: CategoryRecord[], callbackPrefix: "cat_" | "mc:") {
+function buildCategoryKeyboard(categories: CategoryRecord[], callbackPrefix: string) {
   const inlineKeyboard: Array<Array<{ text: string; callback_data: string }>> = [];
 
   for (let index = 0; index < categories.length; index += 3) {
@@ -1475,6 +1549,337 @@ async function checkBudgetAlert(
   });
 }
 
+// ─── /editar handlers ───────────────────────────────────────────────
+
+async function handleEditarCommand(chatId: string, userId: string) {
+  log("cmd_editar", "start", chatId);
+  const transactions = await getRecentTransactions(chatId, userId);
+  if (!transactions) return;
+
+  const categoryMap = await getCategoryMapForTransactions(chatId, userId, transactions);
+  if (!categoryMap) return;
+
+  const lines = transactions.map((tx, idx) => {
+    const cat = categoryMap.get(tx.category_id);
+    const label = cat ? `${cat.emoji} ${cat.name}` : "Categoria";
+    const prefix = tx.type === "income" ? "💰" : "💸";
+    return `${idx + 1}. ${formatDate(tx.date)} · ${prefix} ${formatCents(tx.amount_cents)} · ${label}`;
+  });
+
+  const keyboard = {
+    inline_keyboard: transactions.map((tx, idx) => [
+      { text: `✏️ ${idx + 1}. ${formatCents(tx.amount_cents)}`, callback_data: `edit:${tx.id}` },
+    ]),
+  };
+
+  await sendMessage(chatId, `✏️ Qual transação pretende editar?\n\n${lines.join("\n")}`, keyboard);
+  log("cmd_editar", "success", chatId);
+}
+
+async function handleEditSelectField(chatId: string, messageId: number, transactionId: string) {
+  log("edit_select_field", "start", chatId, { transactionId });
+
+  await setPendingTransaction(chatId, {
+    amount_cents: 0,
+    category_id: null,
+    category_name: null,
+    category_emoji: null,
+    note: "",
+    date: "",
+    type: "expense",
+    payment_method: null,
+    edit_state: { mode: "edit", transaction_id: transactionId, field: null },
+  });
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "💰 Valor", callback_data: "editfield:amount" },
+        { text: "📂 Categoria", callback_data: "editfield:category" },
+      ],
+      [
+        { text: "📝 Nota", callback_data: "editfield:note" },
+        { text: "📅 Data", callback_data: "editfield:date" },
+      ],
+      [{ text: "❌ Cancelar", callback_data: "editfield:cancel" }],
+    ],
+  };
+
+  await safeEditMessage(chatId, messageId, "O que pretende alterar?", keyboard);
+  log("edit_select_field", "success", chatId);
+}
+
+async function handleEditFieldSelected(chatId: string, messageId: number, field: string) {
+  log("edit_field_selected", "start", chatId, { field });
+
+  const pending = await getPendingTransaction(chatId);
+  if (!pending?.edit_state) {
+    await safeEditMessage(chatId, messageId, "❌ Sessão de edição expirada. Use /editar novamente.");
+    return;
+  }
+
+  pending.edit_state.field = field;
+  await setPendingTransaction(chatId, pending);
+
+  const prompts: Record<string, string> = {
+    amount: "💰 Escreva o novo valor (ex: 12.50 ou 12,50):",
+    note: "📝 Escreva a nova nota:",
+    date: "📅 Escreva a nova data (DD/MM/AAAA):",
+    category: "📂 A carregar categorias…",
+  };
+
+  if (field === "category") {
+    const userId = await getUserIdByChatId(supabase, chatId);
+    if (!userId) {
+      await safeEditMessage(chatId, messageId, "Erro de autenticação.");
+      return;
+    }
+
+    const { data: txData } = await supabase
+      .from("transactions")
+      .select("type")
+      .eq("id", pending.edit_state.transaction_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const txType = (txData as { type?: string } | null)?.type === "income" ? "income" : "expense";
+    const categories = await getUserCategories(userId, txType as TransactionType);
+
+    if (categories.length === 0) {
+      await safeEditMessage(chatId, messageId, "Sem categorias disponíveis.");
+      return;
+    }
+
+    const keyboard = buildCategoryKeyboard(categories, "editcat:" as "cat_");
+    await safeEditMessage(chatId, messageId, "📂 Escolha a nova categoria:", keyboard);
+  } else {
+    await safeEditMessage(chatId, messageId, prompts[field] ?? "Escreva o novo valor:");
+  }
+
+  log("edit_field_selected", "success", chatId, { field });
+}
+
+async function handleEditApplyCategory(chatId: string, messageId: number, userId: string, categoryId: string) {
+  log("edit_apply_category", "start", chatId, { categoryId });
+
+  const pending = await getPendingTransaction(chatId);
+  if (!pending?.edit_state?.transaction_id) {
+    await safeEditMessage(chatId, messageId, "❌ Sessão de edição expirada.");
+    return;
+  }
+
+  const { error } = await supabase
+    .from("transactions")
+    .update({ category_id: categoryId, updated_at: new Date().toISOString() })
+    .eq("id", pending.edit_state.transaction_id)
+    .eq("user_id", userId);
+
+  await setPendingTransaction(chatId, null);
+
+  if (error) {
+    log("edit_apply_category", "error", chatId, { error: getErrorMessage(error) });
+    await safeEditMessage(chatId, messageId, "❌ Erro ao atualizar categoria.");
+    return;
+  }
+
+  await safeEditMessage(chatId, messageId, "✅ Categoria atualizada com sucesso!");
+  log("edit_apply_category", "success", chatId);
+}
+
+async function handleEditApplyValue(chatId: string, userId: string, editState: EditState, text: string) {
+  log("edit_apply_value", "start", chatId, { field: editState.field, text });
+
+  const field = editState.field;
+  const transactionId = editState.transaction_id;
+
+  let updatePayload: Record<string, unknown> = {};
+
+  if (field === "amount") {
+    const normalized = text.replace(",", ".").trim();
+    const value = parseFloat(normalized);
+    if (isNaN(value) || value <= 0) {
+      await sendMessage(chatId, "❌ Valor inválido. Escreva um número positivo (ex: 12.50).");
+      return;
+    }
+    updatePayload = { amount_cents: Math.round(value * 100) };
+  } else if (field === "note") {
+    updatePayload = { note: text.trim() || null };
+  } else if (field === "date") {
+    const dateMatch = text.trim().match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+    if (!dateMatch) {
+      await sendMessage(chatId, "❌ Formato inválido. Use DD/MM/AAAA (ex: 15/05/2025).");
+      return;
+    }
+    const [, day, month, year] = dateMatch;
+    const isoDate = `${year}-${month!.padStart(2, "0")}-${day!.padStart(2, "0")}`;
+    const parsed = new Date(isoDate);
+    if (isNaN(parsed.getTime())) {
+      await sendMessage(chatId, "❌ Data inválida.");
+      return;
+    }
+    updatePayload = { date: isoDate };
+  } else {
+    await sendMessage(chatId, "❌ Campo desconhecido.");
+    await setPendingTransaction(chatId, null);
+    return;
+  }
+
+  updatePayload.updated_at = new Date().toISOString();
+
+  const { error } = await supabase
+    .from("transactions")
+    .update(updatePayload)
+    .eq("id", transactionId)
+    .eq("user_id", userId);
+
+  await setPendingTransaction(chatId, null);
+
+  if (error) {
+    log("edit_apply_value", "error", chatId, { error: getErrorMessage(error) });
+    await sendMessage(chatId, "❌ Erro ao atualizar transação.");
+    return;
+  }
+
+  const fieldLabels: Record<string, string> = {
+    amount: "valor",
+    note: "nota",
+    date: "data",
+  };
+  await sendMessage(chatId, `✅ ${capitalize(fieldLabels[field] ?? field)} atualizado com sucesso!`);
+  log("edit_apply_value", "success", chatId, { field });
+}
+
+// ─── /apagar handlers ───────────────────────────────────────────────
+
+async function handleApagarCommand(chatId: string, userId: string) {
+  log("cmd_apagar", "start", chatId);
+  const transactions = await getRecentTransactions(chatId, userId);
+  if (!transactions) return;
+
+  const categoryMap = await getCategoryMapForTransactions(chatId, userId, transactions);
+  if (!categoryMap) return;
+
+  const lines = transactions.map((tx, idx) => {
+    const cat = categoryMap.get(tx.category_id);
+    const label = cat ? `${cat.emoji} ${cat.name}` : "Categoria";
+    const prefix = tx.type === "income" ? "💰" : "💸";
+    return `${idx + 1}. ${formatDate(tx.date)} · ${prefix} ${formatCents(tx.amount_cents)} · ${label}`;
+  });
+
+  const keyboard = {
+    inline_keyboard: transactions.map((tx, idx) => [
+      { text: `🗑️ ${idx + 1}. ${formatCents(tx.amount_cents)}`, callback_data: `del:${tx.id}` },
+    ]),
+  };
+
+  await sendMessage(chatId, `🗑️ Qual transação pretende eliminar?\n\n${lines.join("\n")}`, keyboard);
+  log("cmd_apagar", "success", chatId);
+}
+
+async function handleDeleteConfirmPrompt(chatId: string, messageId: number, transactionId: string, userId: string) {
+  log("del_confirm_prompt", "start", chatId, { transactionId });
+
+  const { data: txData } = await supabase
+    .from("transactions")
+    .select("amount_cents, type, note, date, category_id")
+    .eq("id", transactionId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (!txData) {
+    await safeEditMessage(chatId, messageId, "❌ Transação não encontrada.");
+    return;
+  }
+
+  const tx = txData as TransactionRecord;
+  const prefix = tx.type === "income" ? "💰" : "💸";
+  const detail = tx.note ? ` · ${tx.note}` : "";
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        { text: "✅ Sim, eliminar", callback_data: `delconfirm:${transactionId}` },
+        { text: "❌ Cancelar", callback_data: "delcancel" },
+      ],
+    ],
+  };
+
+  await safeEditMessage(
+    chatId,
+    messageId,
+    `Tem a certeza que pretende eliminar?\n\n${prefix} ${formatCents(tx.amount_cents)} · ${formatDate(tx.date)}${detail}`,
+    keyboard
+  );
+  log("del_confirm_prompt", "success", chatId);
+}
+
+async function handleDeleteConfirm(chatId: string, messageId: number, transactionId: string, userId: string) {
+  log("del_confirm", "start", chatId, { transactionId });
+
+  const { error } = await supabase
+    .from("transactions")
+    .delete()
+    .eq("id", transactionId)
+    .eq("user_id", userId);
+
+  if (error) {
+    log("del_confirm", "error", chatId, { error: getErrorMessage(error) });
+    await safeEditMessage(chatId, messageId, "❌ Erro ao eliminar transação.");
+    return;
+  }
+
+  await safeEditMessage(chatId, messageId, "✅ Transação eliminada com sucesso!");
+  log("del_confirm", "success", chatId);
+}
+
+// ─── Shared helpers for edit/delete ─────────────────────────────────
+
+async function getRecentTransactions(chatId: string, userId: string): Promise<(TransactionRecord & { id: string })[] | null> {
+  const { data, error } = await supabase
+    .from("transactions")
+    .select("id, category_id, amount_cents, type, note, date")
+    .eq("user_id", userId)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(5);
+
+  if (error) {
+    log("get_recent_tx", "error", chatId, { error: getErrorMessage(error) });
+    await sendMessage(chatId, "Não foi possível obter as últimas transações.");
+    return null;
+  }
+
+  const transactions = (data ?? []) as (TransactionRecord & { id: string })[];
+
+  if (transactions.length === 0) {
+    await sendMessage(chatId, "Ainda não há transações registadas.");
+    return null;
+  }
+
+  return transactions;
+}
+
+async function getCategoryMapForTransactions(
+  chatId: string,
+  userId: string,
+  transactions: (TransactionRecord & { id: string })[]
+): Promise<Map<string, CategoryRecord> | null> {
+  const categoryIds = [...new Set(transactions.map((tx) => tx.category_id))];
+  const { data: categoriesData, error } = await supabase
+    .from("categories")
+    .select("id, name, emoji, type, sort_order")
+    .eq("user_id", userId)
+    .in("id", categoryIds);
+
+  if (error) {
+    log("get_categories", "error", chatId, { error: getErrorMessage(error) });
+    await sendMessage(chatId, "Não foi possível carregar categorias.");
+    return null;
+  }
+
+  return new Map(((categoriesData ?? []) as CategoryRecord[]).map((cat) => [cat.id, cat]));
+}
+
 function formatCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";
   const formatted = new Intl.NumberFormat("pt-PT", {
@@ -1554,6 +1959,8 @@ function getHelpText() {
     "/saldo — ver saldo dos orçamentos deste mês",
     "/resumo — ver rendimento, despesas e saldo do mês",
     "/ultimas — listar as últimas 5 transações",
+    "/editar — editar uma transação recente",
+    "/apagar — eliminar uma transação recente",
     "/quota — ver o uso do Gemini hoje",
     "/recibo — ver o último recibo importado",
     "/gasto 12.50 almoço — registar despesa manualmente",
