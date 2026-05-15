@@ -48,7 +48,10 @@ function getInsightBadgeStyle(insight: CategoryTrend['insight']) {
 }
 
 function formatMonthLabel(month: string) {
-  const label = format(parseISO(`${month}-01`), 'MMM', { locale: pt }).replace('.', '');
+  // month is a period key like "2026-04-01" or "2026-04-23"
+  const date = parseISO(month);
+  if (isNaN(date.getTime())) return month;
+  const label = format(date, 'MMM', { locale: pt }).replace('.', '');
   return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
 }
 
