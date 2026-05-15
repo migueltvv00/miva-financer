@@ -67,6 +67,7 @@ export interface Budget {
   category_id: string;
   month: string;
   limit_cents: number;
+  rollover_cents: number;
   created_at: string;
 }
 

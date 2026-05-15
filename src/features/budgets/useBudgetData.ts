@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getPeriodStart, getPeriodKey, getPeriodLabel, getNextPeriod, getPreviousPeriod } from '@/lib/periodUtils';
+import {
+  getPeriodStart,
+  getPeriodKey,
+  getPeriodLabel,
+  getNextPeriod,
+  getPeriodRange,
+  getPreviousPeriod,
+} from '@/lib/periodUtils';
 import { supabase } from '@/lib/supabase';
 import { useBudgetStore } from '@/store/budgetStore';
 import { useSettingsStore } from '@/store/settingsStore';
-import type { Budget } from '@/types';
+import type { Budget, Transaction } from '@/types';
 
 interface UseBudgetDataResult {
   budgets: Budget[];
@@ -15,6 +22,7 @@ interface UseBudgetDataResult {
   goToNextMonth: () => void;
   saveBudgetLimit: (categoryId: string, limitCents: number | null) => Promise<void>;
   copyFromPreviousMonth: () => Promise<number>;
+  rolloverBudgets: () => Promise<number>;
 }
 
 export function useBudgetData(
@@ -29,11 +37,19 @@ export function useBudgetData(
   const setLoading = useBudgetStore((state) => state.setLoading);
   const monthStartDay = useSettingsStore((state) => state.settings.monthStartDay);
 
-  const [selectedMonth, setSelectedMonth] = useState(() => getPeriodStart(new Date(), monthStartDay));
+  const [selectedMonth, setSelectedMonth] = useState(() =>
+    getPeriodStart(new Date(), monthStartDay)
+  );
   const [error, setError] = useState<string | null>(null);
 
-  const monthKey = useMemo(() => getPeriodKey(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
-  const monthLabel = useMemo(() => getPeriodLabel(selectedMonth, monthStartDay), [selectedMonth, monthStartDay]);
+  const monthKey = useMemo(
+    () => getPeriodKey(selectedMonth, monthStartDay),
+    [selectedMonth, monthStartDay]
+  );
+  const monthLabel = useMemo(
+    () => getPeriodLabel(selectedMonth, monthStartDay),
+    [selectedMonth, monthStartDay]
+  );
 
   useEffect(() => {
     let isActive = true;
@@ -46,7 +62,6 @@ export function useBudgetData(
     }
 
     const loadBudgets = async () => {
-      // Only show loading spinner on first load (no cached data)
       const store = useBudgetStore.getState();
       if (store.budgets.length === 0) setLoading(true);
       setError(null);
@@ -107,9 +122,7 @@ export function useBudgetData(
 
       setError(null);
 
-      const existingBudget = budgets.find(
-        (budget) => budget.category_id === categoryId
-      );
+      const existingBudget = budgets.find((budget) => budget.category_id === categoryId);
       const previousBudgets = budgets;
 
       if (limitCents === null) {
@@ -168,6 +181,7 @@ export function useBudgetData(
         category_id: categoryId,
         month: monthKey,
         limit_cents: limitCents,
+        rollover_cents: 0,
         created_at: new Date().toISOString(),
       };
 
@@ -182,6 +196,7 @@ export function useBudgetData(
             category_id: optimisticBudget.category_id,
             month: optimisticBudget.month,
             limit_cents: optimisticBudget.limit_cents,
+            rollover_cents: optimisticBudget.rollover_cents,
           })
           .select()
           .single();
@@ -198,15 +213,7 @@ export function useBudgetData(
         throw err;
       }
     },
-    [
-      addBudget,
-      budgets,
-      monthKey,
-      removeBudget,
-      setBudgets,
-      updateBudget,
-      userId,
-    ]
+    [addBudget, budgets, monthKey, removeBudget, setBudgets, updateBudget, userId]
   );
 
   const copyFromPreviousMonth = useCallback(async () => {
@@ -216,7 +223,10 @@ export function useBudgetData(
 
     setError(null);
     const previousBudgets = budgets;
-    const previousMonthKey = getPeriodKey(getPreviousPeriod(selectedMonth, monthStartDay), monthStartDay);
+    const previousMonthKey = getPeriodKey(
+      getPreviousPeriod(selectedMonth, monthStartDay),
+      monthStartDay
+    );
 
     try {
       const { data: sourceBudgets, error: fetchError } = await supabase
@@ -230,9 +240,7 @@ export function useBudgetData(
         throw fetchError;
       }
 
-      const existingCategoryIds = new Set(
-        previousBudgets.map((budget) => budget.category_id)
-      );
+      const existingCategoryIds = new Set(previousBudgets.map((budget) => budget.category_id));
       const budgetsToCopy = ((sourceBudgets ?? []) as Budget[]).filter(
         (budget) => !existingCategoryIds.has(budget.category_id)
       );
@@ -246,6 +254,7 @@ export function useBudgetData(
         id: crypto.randomUUID(),
         user_id: userId,
         month: monthKey,
+        rollover_cents: 0,
         created_at: new Date().toISOString(),
       }));
 
@@ -260,6 +269,7 @@ export function useBudgetData(
             category_id: budget.category_id,
             month: budget.month,
             limit_cents: budget.limit_cents,
+            rollover_cents: budget.rollover_cents,
           }))
         )
         .select();
@@ -277,7 +287,109 @@ export function useBudgetData(
       setError('Não foi possível copiar os orçamentos.');
       throw err;
     }
-  }, [budgets, monthKey, selectedMonth, setBudgets, userId]);
+  }, [budgets, monthKey, monthStartDay, selectedMonth, setBudgets, userId]);
+
+  const rolloverBudgets = useCallback(async () => {
+    if (!userId) {
+      throw new Error('Sessão indisponível.');
+    }
+
+    if (budgets.length === 0) {
+      return 0;
+    }
+
+    setError(null);
+    const previousBudgets = budgets;
+    const previousPeriodDate = getPreviousPeriod(selectedMonth, monthStartDay);
+    const previousMonthKey = getPeriodKey(previousPeriodDate, monthStartDay);
+    const { periodStart: previousPeriodStart, periodEnd: previousPeriodEnd } = getPeriodRange(
+      previousPeriodDate,
+      monthStartDay
+    );
+
+    try {
+      const [{ data: sourceBudgets, error: sourceError }, { data: spentTransactions, error: spentError }] =
+        await Promise.all([
+          supabase
+            .from('budgets')
+            .select('category_id, limit_cents')
+            .eq('user_id', userId)
+            .eq('month', previousMonthKey),
+          supabase
+            .from('transactions')
+            .select('category_id, amount_cents')
+            .eq('user_id', userId)
+            .eq('type', 'expense')
+            .gte('date', previousPeriodStart)
+            .lt('date', previousPeriodEnd),
+        ]);
+
+      if (sourceError) {
+        throw sourceError;
+      }
+
+      if (spentError) {
+        throw spentError;
+      }
+
+      const previousBudgetMap = new Map(
+        ((sourceBudgets ?? []) as Array<Pick<Budget, 'category_id' | 'limit_cents'>>).map(
+          (budget) => [budget.category_id, budget.limit_cents]
+        )
+      );
+      const spentByCategory = new Map<string, number>();
+
+      ((spentTransactions ?? []) as Array<Pick<Transaction, 'category_id' | 'amount_cents'>>).forEach(
+        (transaction) => {
+          spentByCategory.set(
+            transaction.category_id,
+            (spentByCategory.get(transaction.category_id) ?? 0) + transaction.amount_cents
+          );
+        }
+      );
+
+      const optimisticBudgets = previousBudgets.map((budget) => {
+        const previousLimitCents = previousBudgetMap.get(budget.category_id);
+        const previousSpentCents = spentByCategory.get(budget.category_id) ?? 0;
+        const rolloverCents =
+          typeof previousLimitCents === 'number' ? previousLimitCents - previousSpentCents : 0;
+
+        return {
+          ...budget,
+          rollover_cents: rolloverCents,
+        } satisfies Budget;
+      });
+
+      setBudgets(optimisticBudgets);
+
+      const { data: updatedBudgets, error: upsertError } = await supabase
+        .from('budgets')
+        .upsert(
+          optimisticBudgets.map((budget) => ({
+            id: budget.id,
+            user_id: budget.user_id,
+            category_id: budget.category_id,
+            month: budget.month,
+            limit_cents: budget.limit_cents,
+            rollover_cents: budget.rollover_cents,
+          })),
+          { onConflict: 'id' }
+        )
+        .select();
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      setBudgets((updatedBudgets ?? optimisticBudgets) as Budget[]);
+      return optimisticBudgets.length;
+    } catch (err) {
+      console.error('Erro ao importar rollover:', err);
+      setBudgets(previousBudgets);
+      setError('Não foi possível importar o rollover.');
+      throw err;
+    }
+  }, [budgets, monthStartDay, selectedMonth, setBudgets, userId]);
 
   return {
     budgets,
@@ -289,5 +401,6 @@ export function useBudgetData(
     goToNextMonth,
     saveBudgetLimit,
     copyFromPreviousMonth,
+    rolloverBudgets,
   };
 }

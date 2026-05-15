@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { format, startOfYear } from 'date-fns';
 import { getPeriodEnd } from '@/lib/periodUtils';
 import { useSettingsStore } from '@/store/settingsStore';
@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { useCategoryData } from '@/features/categories/useCategoryData';
+import { InsightsCard } from '@/features/dashboard/InsightsCard';
 import { MealCardWidget } from '@/features/dashboard/MealCardWidget';
 import { PaymentMethodChart } from '@/features/dashboard/PaymentMethodChart';
 import { useSavingsGoalData } from '@/features/goals/useSavingsGoalData';
@@ -27,8 +28,10 @@ import {
 import type { MonthlyReportProps } from '@/features/reports/MonthlyReport';
 import { computeCategoryTrends } from '@/features/trends/trendUtils';
 import { useTrendTransactionData } from '@/features/trends/useTrendTransactionData';
+import { RecurringPanel } from '@/features/transactions/RecurringPanel';
 import { useTransactionData } from '@/features/transactions/useTransactionData';
 import { useAuth } from '@/contexts/AuthContext';
+import { useAutoReportPdf } from '@/hooks/useAutoReportPdf';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { supabase } from '@/lib/supabase';
 import { formatCents } from '@/lib/utils';
@@ -212,6 +215,13 @@ export function DashboardScreen() {
 
   useRealtimeSync(user?.id, selectedMonth);
 
+  const [pdfTriggerKey, setPdfTriggerKey] = useState(0);
+  const triggerPdfGeneration = useCallback(() => {
+    setPdfTriggerKey((currentKey) => currentKey + 1);
+  }, []);
+
+  useAutoReportPdf(user?.id, selectedMonth, triggerPdfGeneration);
+
   const categoryMap = useMemo(
     () => new Map(categories.map((category) => [category.id, category])),
     [categories]
@@ -305,7 +315,8 @@ export function DashboardScreen() {
           return null;
         }
 
-        const limitCents = budgetMap.get(categoryId)?.limit_cents ?? null;
+        const budget = budgetMap.get(categoryId);
+        const limitCents = budget ? budget.limit_cents + budget.rollover_cents : null;
         const percentageUsed =
           typeof limitCents === 'number' && limitCents > 0
             ? spentCents / limitCents
@@ -522,7 +533,7 @@ export function DashboardScreen() {
 
         expenseByCategoryMap.set(budget.category_id, {
           name: category.name,
-          budgetedCents: budget.limit_cents,
+          budgetedCents: budget.limit_cents + budget.rollover_cents,
           actualCents: expenseByCategoryMap.get(budget.category_id)?.actualCents ?? 0,
         });
       });
@@ -542,8 +553,10 @@ export function DashboardScreen() {
 
         expenseByCategoryMap.set(transaction.category_id, {
           name: category.name,
-          budgetedCents:
-            existingItem?.budgetedCents ?? budgetMap.get(transaction.category_id)?.limit_cents ?? null,
+          budgetedCents: existingItem?.budgetedCents ?? (() => {
+            const budget = budgetMap.get(transaction.category_id);
+            return budget ? budget.limit_cents + budget.rollover_cents : null;
+          })(),
           actualCents: (existingItem?.actualCents ?? 0) + transaction.amount_cents,
         });
       });
@@ -686,7 +699,11 @@ export function DashboardScreen() {
               </div>
             }
           >
-            <DashboardPdfExport report={monthlyReportProps} fileName={pdfFileName} />
+            <DashboardPdfExport
+              report={monthlyReportProps}
+              fileName={pdfFileName}
+              triggerDownloadKey={pdfTriggerKey}
+            />
           </Suspense>
 
           <SectionCard
@@ -785,6 +802,13 @@ export function DashboardScreen() {
               </div>
             )}
           </SectionCard>
+
+          <InsightsCard
+            transactions={transactions}
+            trendTransactions={trendTransactions}
+            categories={categories}
+            selectedMonth={selectedMonth}
+          />
         </div>
 
         <div className="flex flex-col gap-4">
@@ -1032,6 +1056,15 @@ export function DashboardScreen() {
               </div>
             ))}
           </div>
+        </SectionCard>
+      )}
+
+      {user && (
+        <SectionCard
+          title="Transações recorrentes"
+          description="Consulte as séries recorrentes ativas deste utilizador."
+        >
+          <RecurringPanel userId={user.id} />
         </SectionCard>
       )}
     </div>

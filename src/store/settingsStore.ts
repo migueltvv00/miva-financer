@@ -4,6 +4,7 @@ interface UserSettings {
   monthStartDay: number;
   reminderDaysBefore: number;
   autoReportPdf: boolean;
+  theme: 'system' | 'light' | 'dark';
 }
 
 interface SettingsStore {
@@ -18,6 +19,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   monthStartDay: 1,
   reminderDaysBefore: 3,
   autoReportPdf: true,
+  theme: 'system',
 };
 
 export const useSettingsStore = create<SettingsStore>((set) => ({

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { LoadingState } from '@/components/LoadingState';
+import { EmptyState } from '@/components/EmptyState';
 import { useBudgetData } from '@/features/budgets/useBudgetData';
 import { formatCents } from '@/lib/utils';
 import { useCategoryStore } from '@/store/categoryStore';
-import { LoadingState } from '@/components/LoadingState';
-import { EmptyState } from '@/components/EmptyState';
 
 interface BudgetScreenProps {
   userId: string | null | undefined;
@@ -92,6 +92,7 @@ export function BudgetScreen({
     goToNextMonth,
     saveBudgetLimit,
     copyFromPreviousMonth,
+    rolloverBudgets,
   } = useBudgetData(userId);
 
   const budgetByCategory = useMemo(
@@ -105,6 +106,7 @@ export function BudgetScreen({
   const [actionError, setActionError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isCopying, setIsCopying] = useState(false);
+  const [isRollingOver, setIsRollingOver] = useState(false);
 
   useEffect(() => {
     setDrafts({});
@@ -216,10 +218,29 @@ export function BudgetScreen({
     }
   };
 
+  const handleRollover = async () => {
+    setActionError(null);
+    setIsRollingOver(true);
+
+    try {
+      const updatedCount = await rolloverBudgets();
+      setDrafts({});
+      setActiveCategoryId(null);
+      setToastMessage(
+        updatedCount > 0 ? 'Rollover importado!' : 'Sem orçamentos para atualizar.'
+      );
+    } catch (err) {
+      console.error('Erro ao importar rollover:', err);
+      setActionError('Não foi possível importar o rollover.');
+    } finally {
+      setIsRollingOver(false);
+    }
+  };
+
   const messages = [categoryError, budgetError, actionError].filter(
     (message): message is string => Boolean(message)
   );
-  const isBusy = isCopying || pendingCategoryId !== null;
+  const isBusy = isCopying || isRollingOver || pendingCategoryId !== null;
 
   return (
     <section className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4 shadow-[var(--shadow-sm)]">
@@ -258,16 +279,29 @@ export function BudgetScreen({
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              void handleCopy();
-            }}
-            disabled={!userId || isBusy || isLoading}
-            className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)] disabled:opacity-40"
-          >
-            {isCopying ? 'A copiar…' : 'Copiar do mês anterior'}
-          </button>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => {
+                void handleCopy();
+              }}
+              disabled={!userId || isBusy || isLoading}
+              className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] px-4 py-2.5 text-sm font-medium text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent-light)] disabled:opacity-40"
+            >
+              {isCopying ? 'A copiar…' : 'Copiar do mês anterior'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                void handleRollover();
+              }}
+              disabled={!userId || isBusy || isLoading}
+              className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-success)] px-4 py-2.5 text-sm font-medium text-[var(--color-success)] transition-colors hover:bg-[var(--color-accent-light)] disabled:opacity-40"
+            >
+              {isRollingOver ? 'A importar…' : 'Importar rollover'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -276,7 +310,7 @@ export function BudgetScreen({
           {messages.map((message) => (
             <p
               key={message}
-              className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-red-50 px-3 py-2 text-sm text-[var(--color-danger)]"
+              className="rounded-[var(--radius-md)] border border-[var(--color-danger)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-danger)]"
             >
               {message}
             </p>
@@ -292,6 +326,10 @@ export function BudgetScreen({
         <ul className="mt-4 flex flex-col gap-3">
           {expenseCategories.map((category) => {
             const budget = budgetByCategory.get(category.id);
+            const effectiveLimitCents = budget
+              ? budget.limit_cents + budget.rollover_cents
+              : null;
+            const hasRollover = Boolean(budget && budget.rollover_cents !== 0);
             const inputValue =
               drafts[category.id] ??
               (budget ? formatBudgetDisplayValue(budget.limit_cents) : '');
@@ -313,15 +351,30 @@ export function BudgetScreen({
                         <p className="truncate text-sm font-medium text-[var(--color-text)]">
                           {category.name}
                         </p>
-                        <p className="mt-1 text-xs text-[var(--color-text-secondary)]">
-                          {isSavingCategory
-                            ? 'A guardar…'
-                            : isEditingCategory
-                              ? 'Prima Enter para guardar.'
-                              : budget
-                                ? `Atual: ${formatCents(budget.limit_cents)}`
-                                : 'Sem limite definido'}
-                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <p className="text-xs text-[var(--color-text-secondary)]">
+                            {isSavingCategory
+                              ? 'A guardar…'
+                              : isEditingCategory
+                                ? 'Prima Enter para guardar.'
+                                : budget && effectiveLimitCents !== null
+                                  ? `Atual: ${formatCents(effectiveLimitCents)}`
+                                  : 'Sem limite definido'}
+                          </p>
+                          {hasRollover && budget && (
+                            <span
+                              className={`rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                                budget.rollover_cents > 0
+                                  ? 'border-[var(--color-success)] text-[var(--color-success)]'
+                                  : 'border-[var(--color-danger)] text-[var(--color-danger)]'
+                              }`}
+                            >
+                              {budget.rollover_cents > 0
+                                ? `▼ ${formatCents(budget.rollover_cents)}`
+                                : `▲ ${formatCents(Math.abs(budget.rollover_cents))}`}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

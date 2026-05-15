@@ -19,7 +19,7 @@ export function useUserSettings(userId: string | undefined) {
       try {
         const { data, error } = await supabase
           .from('user_settings')
-          .select('month_start_day, reminder_days_before, auto_report_pdf')
+          .select('month_start_day, reminder_days_before, auto_report_pdf, theme')
           .eq('user_id', userId)
           .maybeSingle();
 
@@ -33,6 +33,7 @@ export function useUserSettings(userId: string | undefined) {
             monthStartDay: data.month_start_day,
             reminderDaysBefore: data.reminder_days_before,
             autoReportPdf: data.auto_report_pdf,
+            theme: data.theme ?? 'system',
           });
         }
       } finally {
@@ -44,7 +45,7 @@ export function useUserSettings(userId: string | undefined) {
   }, [userId, setLoading, setSettings]);
 
   const updateSettings = useCallback(
-    async (updates: Partial<{ monthStartDay: number; reminderDaysBefore: number; autoReportPdf: boolean }>) => {
+    async (updates: Partial<{ monthStartDay: number; reminderDaysBefore: number; autoReportPdf: boolean; theme: 'system' | 'light' | 'dark' }>) => {
       if (!userId) return;
 
       const newSettings = { ...settings, ...updates };
@@ -57,6 +58,7 @@ export function useUserSettings(userId: string | undefined) {
           month_start_day: newSettings.monthStartDay,
           reminder_days_before: newSettings.reminderDaysBefore,
           auto_report_pdf: newSettings.autoReportPdf,
+          theme: newSettings.theme,
           updated_at: new Date().toISOString(),
         }, { onConflict: 'user_id' });
 

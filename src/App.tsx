@@ -5,6 +5,7 @@ import { AppLayout } from '@/components/AppLayout';
 import { AuthScreen } from '@/features/auth/AuthScreen';
 import { ScreenSkeleton } from '@/components/ScreenSkeleton';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { useTheme } from '@/hooks/useTheme';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
 
 // Lazy-loaded route screens
@@ -62,9 +63,15 @@ function LazyRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ThemeApplier() {
+  useTheme();
+  return null;
+}
+
 export function App() {
   return (
     <AuthProvider>
+      <ThemeApplier />
       <BrowserRouter>
         <Routes>
           <Route

@@ -14,6 +14,7 @@ import { GeminiQuotaPanel } from '@/features/settings/GeminiQuotaPanel';
 import { PeriodSettings } from '@/features/settings/PeriodSettings';
 import { PayslipImport } from '@/features/settings/PayslipImport';
 import { TelegramSettings } from '@/features/settings/TelegramSettings';
+import { useUserSettings } from '@/hooks/useUserSettings';
 import { useAuth } from '@/contexts/AuthContext';
 
 function formatImportSessionDate(dateValue: string) {
@@ -26,6 +27,7 @@ function formatImportSessionDate(dateValue: string) {
 export function SettingsScreen() {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
+  const { settings, updateSettings, isLoading: isLoadingSettings } = useUserSettings(user?.id);
   const { error: categoryError } = useCategoryData(user?.id);
   const {
     sessions,
@@ -96,6 +98,46 @@ export function SettingsScreen() {
         <IncomeSourceList userId={user?.id} />
         <InstalmentList userId={user?.id} />
         <PeriodSettings />
+
+        <section className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] p-4">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold text-[var(--color-text)]">Aparência</h3>
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Escolha entre claro, escuro ou seguir o tema do sistema.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            {(['light', 'dark', 'system'] as const).map((option) => {
+              const isActive = settings.theme === option;
+
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => {
+                    void updateSettings({ theme: option }).catch((error: unknown) => {
+                      console.error('Erro ao guardar tema:', error);
+                    });
+                  }}
+                  disabled={!user || isLoadingSettings}
+                  className={`flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border px-4 py-2.5 text-sm font-medium transition-colors ${
+                    isActive
+                      ? 'border-[var(--color-accent)] bg-[var(--color-accent-light)] text-[var(--color-accent)]'
+                      : 'border-[var(--color-border)] bg-[var(--color-bg-secondary)] text-[var(--color-text)] hover:bg-[var(--color-bg-hover)]'
+                  } disabled:opacity-50`}
+                >
+                  {option === 'light'
+                    ? '☀️ Claro'
+                    : option === 'dark'
+                      ? '🌙 Escuro'
+                      : '🖥️ Sistema'}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
         <PlanningScreen userId={user?.id} />
         <BudgetScreen userId={user?.id} categoryError={categoryError} />
 
