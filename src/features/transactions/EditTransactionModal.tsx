@@ -123,7 +123,10 @@ function backspaceAmountInput(currentValue: string) {
 }
 
 function formatEntryDate(dateValue: string) {
-  return format(new Date(`${dateValue}T12:00:00`), 'd MMM yyyy', { locale: pt });
+  if (!dateValue) return '—';
+  const d = new Date(`${dateValue}T12:00:00`);
+  if (isNaN(d.getTime())) return dateValue;
+  return format(d, 'd MMM yyyy', { locale: pt });
 }
 
 function formatAmountInputFromCents(amountCents: number) {

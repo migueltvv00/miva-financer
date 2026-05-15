@@ -53,7 +53,8 @@ type PullGesture = {
 type DeleteScope = 'single' | 'future' | null;
 
 function toLocalDate(dateValue: string) {
-  return new Date(`${dateValue}T12:00:00`);
+  const d = new Date(`${dateValue}T12:00:00`);
+  return isNaN(d.getTime()) ? new Date() : d;
 }
 
 function capitalizeLabel(value: string) {

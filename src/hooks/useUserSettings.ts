@@ -5,20 +5,15 @@ import { useSettingsStore } from '@/store/settingsStore';
 export function useUserSettings(userId: string | undefined) {
   const settings = useSettingsStore((s) => s.settings);
   const isLoading = useSettingsStore((s) => s.isLoading);
-  const lastFetchedAt = useSettingsStore((s) => s.lastFetchedAt);
   const setSettings = useSettingsStore((s) => s.setSettings);
   const setLoading = useSettingsStore((s) => s.setLoading);
-  const fetchingRef = useRef(false);
+  const hasFetchedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!userId || fetchingRef.current) return;
+    if (!userId || hasFetchedRef.current === userId) return;
 
-    // Stale-while-revalidate: only show loading on first fetch
-    if (!lastFetchedAt) {
-      setLoading(true);
-    }
-
-    fetchingRef.current = true;
+    setLoading(true);
+    hasFetchedRef.current = userId;
 
     const load = async () => {
       try {
@@ -40,15 +35,13 @@ export function useUserSettings(userId: string | undefined) {
             autoReportPdf: data.auto_report_pdf,
           });
         }
-        // If no row exists, defaults are used (monthStartDay=1)
       } finally {
         setLoading(false);
-        fetchingRef.current = false;
       }
     };
 
     void load();
-  }, [userId, lastFetchedAt, setLoading, setSettings]);
+  }, [userId, setLoading, setSettings]);
 
   const updateSettings = useCallback(
     async (updates: Partial<{ monthStartDay: number; reminderDaysBefore: number; autoReportPdf: boolean }>) => {
