@@ -135,16 +135,6 @@ Each feature folder is self-contained: its own components, hooks, and types. Sha
 - Never swallow errors silently. Log to `console.error` in development.
 - Network errors trigger the offline queue for write operations.
 
-## Build & Run
-
-Use the Build-and-Validate agent located at:
-.claude/agents/build-and-validate/build_and_validate.agent.md
-
-Follow its workflow strictly:
-- validator → diagnose → repair loop
-- update decision log after each iteration
-- run regression after success
-- stop on escalation conditions
 
 ## Privileged actions
 If you are doing an action that will require sudo, just tell me the command you want to run.
@@ -179,9 +169,19 @@ For frontend development, use the React expert agents located at:
 - `~/miva-projects/awesome-copilot/agents/react19-*` - starting with `react19-migrator.agent.md` for React 18 → 19 migration, then use the remainder 'react-19*' agents to improve code quality, modularity, and maintainability
 
 For backend developement, use the expert typescript agent located at:
-- `~/miva-projects/awesome-copilot/agents/typescript-mcp-expert.agent.md
+- `~/miva-projects/awesome-copilot/agents/
 
-for feature development
+## Build & Run
+
+Use the Build-and-Validate agent located at:
+.claude/agents/build-and-validate/build_and_validate.agent.md
+
+Follow its workflow strictly:
+- validator → diagnose → repair loop
+- update decision log after each iteration
+- run regression after success
+- stop on escalation conditions
+
 ## Cleanup Phase Structure
 
 Each item is a separate commit, never batched:

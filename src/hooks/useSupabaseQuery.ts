@@ -53,18 +53,26 @@ export function useSupabaseQuery<T extends { id: string }>(
       const now = Date.now();
       const isStale = !lastFetchedAt || now - lastFetchedAt > staleTime;
 
+      // #6: Read item count directly from store to avoid recreating this callback on every insert/delete
+      const currentItemCount = store.getState().items.length;
+
       // Show cached data immediately; only refetch if stale or forced
-      if (!force && !isStale && items.length > 0) return;
+      if (!force && !isStale && currentItemCount > 0) return;
 
       // Request deduplication
       const dedupeKey = `${key}:${userId}`;
       if (inFlightRequests.has(dedupeKey)) {
-        await inFlightRequests.get(dedupeKey);
+        // #7: Apply resolved data instead of silently returning so late-mounters get the result
+        const data = await inFlightRequests.get(dedupeKey);
+        if (mountedRef.current) {
+          setItems(data as T[]);
+          setError(null);
+        }
         return;
       }
 
       // Only show loading spinner on first load (no cached data)
-      if (items.length === 0) setLoading(true);
+      if (currentItemCount === 0) setLoading(true);
 
       // Version counter: prevents stale responses from overwriting newer data
       const fetchVersion = ++fetchVersionRef.current;
@@ -87,7 +95,7 @@ export function useSupabaseQuery<T extends { id: string }>(
         inFlightRequests.delete(dedupeKey);
       }
     },
-    [userId, enabled, key, queryFn, lastFetchedAt, staleTime, items.length, setItems, setLoading, setError]
+    [userId, enabled, key, queryFn, lastFetchedAt, staleTime, store, setItems, setLoading, setError]
   );
 
   // Initial fetch

@@ -70,7 +70,7 @@ export function useMealCardBudget(userId: string | null | undefined): UseMealCar
           setSpent(0);
         }
       } finally {
-        if (active) setIsLoading(false);
+        setIsLoading(false);
       }
     };
 

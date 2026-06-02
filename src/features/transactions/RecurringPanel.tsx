@@ -66,9 +66,7 @@ export function RecurringPanel({ userId }: RecurringPanelProps) {
         setTransactions([]);
         setError('Não foi possível carregar as transações recorrentes.');
       } finally {
-        if (isActive) {
-          setIsLoading(false);
-        }
+        setIsLoading(false);
       }
     };
 

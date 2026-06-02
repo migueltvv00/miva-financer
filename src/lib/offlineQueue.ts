@@ -70,6 +70,13 @@ export function getQueue() {
 
 export function addToQueue(transaction: Transaction) {
   const queue = readQueue();
+
+  // #9: Prevent unbounded queue growth — silently drop if over capacity
+  if (queue.length >= 100) {
+    console.warn('[offlineQueue] Fila offline cheia (100 itens). Transação descartada.', transaction.id);
+    return;
+  }
+
   writeQueue([...queue, transaction]);
 }
 

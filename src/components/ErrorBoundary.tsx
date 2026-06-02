@@ -10,6 +10,15 @@ interface State {
   error: Error | null;
 }
 
+function isChunkLoadError(error: Error): boolean {
+  return (
+    error.name === 'ChunkLoadError' ||
+    /Failed to fetch dynamically imported module/.test(error.message) ||
+    /Loading chunk \d+ failed/.test(error.message) ||
+    /dynamically imported module/.test(error.message)
+  );
+}
+
 export class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
@@ -22,10 +31,21 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, errorInfo);
+
+    // Stale SW served a cached chunk that no longer exists. Reload to pick up
+    // the new bundle — the SW will fetch fresh assets after the reload.
+    if (isChunkLoadError(error)) {
+      setTimeout(() => window.location.reload(), 100);
+    }
   }
 
   render() {
     if (this.state.hasError) {
+      // While waiting for the chunk-error reload, render nothing to avoid flash.
+      if (this.state.error && isChunkLoadError(this.state.error)) {
+        return null;
+      }
+
       if (this.props.fallback) return this.props.fallback;
 
       return (

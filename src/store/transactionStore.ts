@@ -6,6 +6,7 @@ interface TransactionState {
   trendTransactions: Transaction[];
   isLoading: boolean;
   isLoadingTrendTransactions: boolean;
+  error: string | null; // #10: surface fetch errors instead of silently swallowing them
   setTransactions: (transactions: Transaction[]) => void;
   setTrendTransactions: (transactions: Transaction[]) => void;
   addTransaction: (transaction: Transaction) => void;
@@ -13,6 +14,7 @@ interface TransactionState {
   removeTransaction: (id: string) => void;
   setLoading: (loading: boolean) => void;
   setTrendTransactionsLoading: (loading: boolean) => void;
+  setError: (error: string | null) => void;
 }
 
 function sortTransactions(transactions: Transaction[]) {
@@ -37,6 +39,7 @@ export const useTransactionStore = create<TransactionState>((set) => ({
   trendTransactions: [],
   isLoading: false,
   isLoadingTrendTransactions: false,
+  error: null,
   setTransactions: (transactions) => set({ transactions: sortTransactions(transactions) }),
   setTrendTransactions: (transactions) =>
     set({ trendTransactions: sortTransactions(transactions) }),
@@ -74,4 +77,5 @@ export const useTransactionStore = create<TransactionState>((set) => ({
   setLoading: (isLoading) => set({ isLoading }),
   setTrendTransactionsLoading: (isLoadingTrendTransactions) =>
     set({ isLoadingTrendTransactions }),
+  setError: (error) => set({ error }),
 }));

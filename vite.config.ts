@@ -44,15 +44,16 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/auth/],
         runtimeCaching: [
           {
-            // Don't cache Supabase auth API calls
-            urlPattern: /\/auth\/v1\//,
+            // Never cache any Supabase API calls — always go to network
+            urlPattern: /^https:\/\/[a-z0-9]+\.supabase\.co\//,
             handler: 'NetworkOnly',
           },
         ],
       },
+      // Disabled in dev: SW interferes with Vite HMR and caches module URLs,
+      // causing stale chunks to be served on hot-reload / page refresh.
       devOptions: {
-        enabled: true,
-        type: 'module',
+        enabled: false,
       },
     }),
   ],

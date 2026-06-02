@@ -128,10 +128,8 @@ export function useInvestmentData(
         setStoredSnapshots([]);
         setError('Não foi possível carregar os dados de investimentos.');
       } finally {
-        if (isActive) {
-          setAccountsLoading(false);
-          setSnapshotsLoading(false);
-        }
+        setAccountsLoading(false);
+        setSnapshotsLoading(false);
       }
     };
 

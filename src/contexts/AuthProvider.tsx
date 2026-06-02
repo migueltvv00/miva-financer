@@ -3,6 +3,10 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthContext, type AuthContextValue, type AuthState } from '@/contexts/AuthContext';
 import { supabase } from '@/lib/supabase';
 import { seedDefaultCategories } from '@/lib/seedCategories';
+import { resetAllStores } from '@/store/resetAllStores';
+
+// #1: Only proactively refresh if the token expires within this window
+const REFRESH_THRESHOLD_SECONDS = 300; // 5 minutes
 
 const AUTH_LOADING_TIMEOUT_MS = 8_000;
 
@@ -43,17 +47,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (cancelled || resolvedRef.current) return;
 
         if (session) {
-          const {
-            data: { session: refreshed },
-            error,
-          } = await supabase.auth.refreshSession();
-          if (cancelled || resolvedRef.current) return;
+          const expiresAt = session.expires_at ?? 0;
+          const nowSeconds = Date.now() / 1000;
 
-          if (error || !refreshed) {
-            console.warn('Sessão expirada, será necessário autenticar novamente.');
-            setAuthState(null);
+          if (expiresAt - nowSeconds < REFRESH_THRESHOLD_SECONDS) {
+            // Token is near expiry — proactively refresh
+            const {
+              data: { session: refreshed },
+              error,
+            } = await supabase.auth.refreshSession();
+            if (cancelled || resolvedRef.current) return;
+
+            if (error || !refreshed) {
+              console.warn('Sessão expirada, será necessário autenticar novamente.');
+              setAuthState(null);
+            } else {
+              setAuthState(refreshed);
+            }
           } else {
-            setAuthState(refreshed);
+            // Token is still valid — use it as-is
+            setAuthState(session);
           }
         } else {
           setAuthState(null);
@@ -97,9 +110,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        void supabase.auth.getSession();
+    const handleVisibilityChange = async () => {
+      if (document.hidden) return;
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        // #2: Update React state with fresh session; only replace if user ID changed
+        setState((prev) => {
+          const newUserId = session?.user?.id ?? null;
+          const prevUserId = prev.user?.id ?? null;
+          if (newUserId === prevUserId) return prev;
+          return { user: session?.user ?? null, session, isLoading: false };
+        });
+      } catch (err) {
+        console.error('[AuthProvider] Erro ao verificar sessão após retomar:', err);
       }
     };
 
@@ -118,6 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    // #3: Clear all domain store data before signing out
+    resetAllStores();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
   }, []);

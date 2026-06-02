@@ -91,9 +91,7 @@ export function useMonthlyPlanData(
         setPlan(null);
         setError('Não foi possível carregar o plano mensal.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

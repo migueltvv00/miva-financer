@@ -19,6 +19,12 @@ export function useOfflineSync({
   const isOnline = useOnlineStatus();
   const wasOfflineRef = useRef(!isOnline);
   const isSyncingRef = useRef(false);
+  // #5: Capture callbacks in refs so the effect never needs them as deps.
+  // This prevents the effect from re-running when callers pass inline functions.
+  const onSyncSuccessRef = useRef(onSyncSuccess);
+  const onSyncErrorRef = useRef(onSyncError);
+  onSyncSuccessRef.current = onSyncSuccess;
+  onSyncErrorRef.current = onSyncError;
 
   useEffect(() => {
     const cameBackOnline = isOnline && wasOfflineRef.current;
@@ -35,17 +41,17 @@ export function useOfflineSync({
     void flushQueue()
       .then((failed) => {
         const successCount = totalCount - failed.length;
-        if (successCount > 0) onSyncSuccess?.(successCount);
-        if (failed.length > 0) onSyncError?.(failed.length);
+        if (successCount > 0) onSyncSuccessRef.current?.(successCount);
+        if (failed.length > 0) onSyncErrorRef.current?.(failed.length);
       })
       .catch((err: unknown) => {
         console.error('[useOfflineSync] Erro durante sincronização:', err);
-        onSyncError?.(totalCount);
+        onSyncErrorRef.current?.(totalCount);
       })
       .finally(() => {
         isSyncingRef.current = false;
       });
-  }, [isOnline, onSyncSuccess, onSyncError]);
+  }, [isOnline]);
 
   return { isOnline };
 }

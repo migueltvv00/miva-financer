@@ -108,12 +108,15 @@ export function useRealtimeSync(
   userId: string | null | undefined,
   selectedMonth: Date
 ) {
+  // #8: Subscribe to monthStartDay reactively so the channel re-establishes
+  // if the user changes their setting (previously read via getState(), which is non-reactive)
+  const monthStartDay = useSettingsStore((s) => s.settings.monthStartDay);
+
   useEffect(() => {
     if (!userId) {
       return;
     }
 
-    const monthStartDay = useSettingsStore.getState().settings.monthStartDay;
     const monthKey = getPeriodKey(selectedMonth, monthStartDay);
     const { periodStart, periodEnd } = getPeriodRange(selectedMonth, monthStartDay);
 
@@ -163,5 +166,5 @@ export function useRealtimeSync(
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [selectedMonth, userId]);
+  }, [selectedMonth, userId, monthStartDay]);
 }

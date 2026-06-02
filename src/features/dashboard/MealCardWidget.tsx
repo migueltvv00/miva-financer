@@ -84,7 +84,7 @@ export function MealCardWidget({ userId }: MealCardWidgetProps) {
         setCredit(null);
         setSpent(0);
       } finally {
-        if (isActive) setIsLoading(false);
+        setIsLoading(false);
       }
     }
 
