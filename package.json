@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
+    "test": "pnpm run test:e2e",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },

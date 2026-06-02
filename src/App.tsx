@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { AuthProvider } from '@/contexts/AuthProvider';
 import { AppLayout } from '@/components/AppLayout';
 import { AuthScreen } from '@/features/auth/AuthScreen';
 import { ScreenSkeleton } from '@/components/ScreenSkeleton';
