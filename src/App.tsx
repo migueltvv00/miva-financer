@@ -7,6 +7,8 @@ import { AuthScreen } from '@/features/auth/AuthScreen';
 import { ScreenSkeleton } from '@/components/ScreenSkeleton';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { useTheme } from '@/hooks/useTheme';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { useOfflineSync } from '@/hooks/useOfflineSync';
 import { processRecurringTransactions } from '@/lib/recurringEngine';
 
 // Lazy-loaded route screens
@@ -69,10 +71,36 @@ function ThemeApplier() {
   return null;
 }
 
+function OfflineBanner() {
+  const isOnline = useOnlineStatus();
+  useOfflineSync({
+    onSyncSuccess: (count) => {
+      console.info(`[Fluxo] ${count} transação(ões) sincronizadas após reconexão.`);
+    },
+    onSyncError: (count) => {
+      console.warn(`[Fluxo] ${count} transação(ões) falharam ao sincronizar.`);
+    },
+  });
+
+  if (isOnline) return null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-x-0 top-0 z-50 flex items-center justify-center gap-2 bg-[var(--color-warning)] px-4 py-2 text-xs font-medium text-white"
+    >
+      <span aria-hidden="true">⚠️</span>
+      Offline — as alterações serão sincronizadas quando a ligação for restaurada
+    </div>
+  );
+}
+
 export function App() {
   return (
     <AuthProvider>
       <ThemeApplier />
+      <OfflineBanner />
       <BrowserRouter>
         <Routes>
           <Route

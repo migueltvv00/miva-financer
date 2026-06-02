@@ -692,19 +692,25 @@ export function DashboardScreen() {
 
           {user && <MealCardWidget userId={user.id} />}
 
-          <Suspense
-            fallback={
-              <div className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg)] px-4 py-2 text-sm font-medium text-[var(--color-accent)]">
-                A preparar exportação…
-              </div>
-            }
+          {/* Prefetch PDF chunk on hover/focus to reduce perceived latency */}
+          <div
+            onMouseEnter={() => void import('@/features/dashboard/DashboardPdfExport')}
+            onFocus={() => void import('@/features/dashboard/DashboardPdfExport')}
           >
-            <DashboardPdfExport
-              report={monthlyReportProps}
-              fileName={pdfFileName}
-              triggerDownloadKey={pdfTriggerKey}
-            />
-          </Suspense>
+            <Suspense
+              fallback={
+                <div className="inline-flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg)] px-4 py-2 text-sm font-medium text-[var(--color-accent)]">
+                  A preparar exportação…
+                </div>
+              }
+            >
+              <DashboardPdfExport
+                report={monthlyReportProps}
+                fileName={pdfFileName}
+                triggerDownloadKey={pdfTriggerKey}
+              />
+            </Suspense>
+          </div>
 
           <SectionCard
             title="Progresso por categoria"

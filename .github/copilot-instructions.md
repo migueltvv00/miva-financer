@@ -137,14 +137,18 @@ Each feature folder is self-contained: its own components, hooks, and types. Sha
 
 ## Build & Run
 
-```bash
-pnpm install          # Install dependencies
-pnpm dev              # Start dev server
-pnpm build            # Production build
-pnpm preview          # Preview production build locally
-pnpm lint             # ESLint
-pnpm type-check       # tsc --noEmit
-```
+Use the Build-and-Validate agent located at:
+.claude/agents/build-and-validate/build_and_validate.agent.md
+
+Follow its workflow strictly:
+- validator → diagnose → repair loop
+- update decision log after each iteration
+- run regression after success
+- stop on escalation conditions
+
+## Privileged actions
+If you are doing an action that will require sudo, just tell me the command you want to run.
+Then open a dialogue so I can confirm that it's done before you continue.
 
 ## Environment Variables
 
@@ -171,15 +175,13 @@ Required:
 
 ## Development Workflow (Every Phase)
 
-1. Check Jira for existing tickets before creating new ones.
-2. Implement the feature.
-3. Run the test agent to validate before moving to the next phase.
-4. Open a PR with the Jira ticket ID in branch name and title.
-5. Merge only after tests pass.
-6. Update README with what was built, ticket reference, setup steps.
+For frontend development, use the React expert agents located at:
+- `~/miva-projects/awesome-copilot/agents/react19-*` - starting with `react19-migrator.agent.md` for React 18 → 19 migration, then use the remainder 'react-19*' agents to improve code quality, modularity, and maintainability
 
-**No refactoring during feature phases** — all cleanup is strictly deferred to the cleanup phase.
+For backend developement, use the expert typescript agent located at:
+- `~/miva-projects/awesome-copilot/agents/typescript-mcp-expert.agent.md
 
+for feature development
 ## Cleanup Phase Structure
 
 Each item is a separate commit, never batched:
@@ -189,22 +191,3 @@ Each item is a separate commit, never batched:
 4. Error handling — every async op has try/catch, user-facing toast
 5. Dead code removal
 6. README and JSDoc
-
-## Development Phases (v1.0)
-
-Each phase is a gate — do not proceed to the next until the current one is verified:
-
-1. **Project scaffold** — Vite + React + TS + Tailwind + Supabase client + Zustand skeleton + PWA + navigation shell
-2. **Auth** — Login/signup, useAuth, protected routes, category seed on first login
-3. **Categories management** — CRUD, reorder, lock defaults
-4. **Quick transaction entry** — NumPad, category grid, optimistic submit, offline queue
-5. **Transaction list** — Grouped by date, filters, swipe delete, edit modal
-6. **Budget limits** — Per-category monthly limits, copy from last month
-7. **Monthly summary dashboard** — Charts, progress bars, realtime sync
-8. **Recurring transactions** — Toggle, frequency, auto-creation, delete one/all future
-
-### Stop and Ask
-
-Before starting Phase 1, confirm:
-- `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are provided
-- Supabase project is created in Frankfurt (eu-central-1)

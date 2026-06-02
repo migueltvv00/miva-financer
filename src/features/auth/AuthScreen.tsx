@@ -1,39 +1,49 @@
-import { useState } from 'react';
+import { useActionState, useState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { mapAuthError } from '@/lib/authErrors';
 
 type AuthMode = 'login' | 'signup';
+
+function SubmitButton({ mode }: { mode: AuthMode }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
+    >
+      {pending ? 'A processar…' : mode === 'login' ? 'Entrar' : 'Criar conta'}
+    </button>
+  );
+}
 
 export function AuthScreen() {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<AuthMode>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [signupSuccess, setSignupSuccess] = useState(false);
+  const [signupEmail, setSignupEmail] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
+  const [error, formAction] = useActionState(
+    async (_prevError: string | null, formData: FormData): Promise<string | null> => {
+      const email = (formData.get('email') as string | null) ?? '';
+      const password = (formData.get('password') as string | null) ?? '';
 
-    try {
-      if (mode === 'signup') {
-        await signUp(email, password);
-        setSignupSuccess(true);
-      } else {
-        await signIn(email, password);
+      try {
+        if (mode === 'signup') {
+          await signUp(email, password);
+          setSignupEmail(email);
+        } else {
+          await signIn(email, password);
+        }
+        return null;
+      } catch (err) {
+        return mapAuthError(err);
       }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Ocorreu um erro inesperado.';
-      setError(message);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+    },
+    null
+  );
 
-  if (signupSuccess) {
+  if (signupEmail !== null) {
     return (
       <div className="flex min-h-full items-center justify-center p-6">
         <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--color-bg)] p-8 shadow-[var(--shadow-md)]">
@@ -43,12 +53,12 @@ export function AuthScreen() {
               Verifique o seu e-mail
             </h2>
             <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-              Enviámos um link de confirmação para <strong>{email}</strong>.
+              Enviámos um link de confirmação para <strong>{signupEmail}</strong>.
               Clique no link para ativar a sua conta.
             </p>
             <button
               onClick={() => {
-                setSignupSuccess(false);
+                setSignupEmail(null);
                 setMode('login');
               }}
               className="mt-6 text-sm font-medium text-[var(--color-accent)] hover:text-[var(--color-accent-hover)]"
@@ -70,13 +80,11 @@ export function AuthScreen() {
             Fluxo
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
-            {mode === 'login'
-              ? 'Entre na sua conta'
-              : 'Crie uma nova conta'}
+            {mode === 'login' ? 'Entre na sua conta' : 'Crie uma nova conta'}
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form action={formAction} className="flex flex-col gap-4">
           <div>
             <label
               htmlFor="email"
@@ -86,11 +94,10 @@ export function AuthScreen() {
             </label>
             <input
               id="email"
+              name="email"
               type="email"
               required
               autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)] min-h-[44px]"
               placeholder="email@exemplo.com"
             />
@@ -105,12 +112,11 @@ export function AuthScreen() {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
               required
               autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               minLength={6}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-3 py-2.5 text-sm text-[var(--color-text)] outline-none transition-colors focus:border-[var(--color-accent)] min-h-[44px]"
               placeholder="Mínimo 6 caracteres"
             />
@@ -122,25 +128,12 @@ export function AuthScreen() {
             </p>
           )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="flex min-h-[44px] items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-accent)] px-4 py-2.5 text-sm font-semibold text-[var(--color-text-inverse)] transition-colors hover:bg-[var(--color-accent-hover)] disabled:opacity-50"
-          >
-            {isSubmitting
-              ? 'A processar…'
-              : mode === 'login'
-                ? 'Entrar'
-                : 'Criar conta'}
-          </button>
+          <SubmitButton mode={mode} />
         </form>
 
         <div className="mt-4 text-center">
           <button
-            onClick={() => {
-              setMode(mode === 'login' ? 'signup' : 'login');
-              setError(null);
-            }}
+            onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
             className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-accent)]"
           >
             {mode === 'login'

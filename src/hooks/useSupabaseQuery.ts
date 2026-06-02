@@ -15,6 +15,17 @@ interface UseSupabaseQueryOptions<T extends { id: string }> {
   staleTime?: number; // ms, default 60_000
 }
 
+function toRealtimeRecord<T extends { id: string }>(
+  value: unknown,
+  context: string
+): T | null {
+  if (typeof value !== 'object' || value === null || !('id' in value)) {
+    console.warn(`[Realtime] Payload inválido para ${context}:`, value);
+    return null;
+  }
+  return value as T;
+}
+
 export function useSupabaseQuery<T extends { id: string }>(
   options: UseSupabaseQueryOptions<T>
 ) {
@@ -32,6 +43,7 @@ export function useSupabaseQuery<T extends { id: string }>(
   const removeItem = store((s) => s.removeItem);
 
   const mountedRef = useRef(true);
+  const fetchVersionRef = useRef(0);
   const channelRef = useRef<RealtimeChannel | null>(null);
 
   const fetchData = useCallback(
@@ -54,17 +66,20 @@ export function useSupabaseQuery<T extends { id: string }>(
       // Only show loading spinner on first load (no cached data)
       if (items.length === 0) setLoading(true);
 
+      // Version counter: prevents stale responses from overwriting newer data
+      const fetchVersion = ++fetchVersionRef.current;
+
       const promise = queryFn(supabase, userId);
       inFlightRequests.set(dedupeKey, promise);
 
       try {
         const data = await promise;
-        if (mountedRef.current) {
+        if (mountedRef.current && fetchVersion === fetchVersionRef.current) {
           setItems(data);
           setError(null);
         }
       } catch (err) {
-        if (mountedRef.current) {
+        if (mountedRef.current && fetchVersion === fetchVersionRef.current) {
           setError(err instanceof Error ? err.message : 'Erro ao carregar dados');
           setLoading(false);
         }
@@ -103,11 +118,14 @@ export function useSupabaseQuery<T extends { id: string }>(
         (payload) => {
           if (!mountedRef.current) return;
           if (payload.eventType === 'INSERT') {
-            addItem(payload.new as T);
+            const record = toRealtimeRecord<T>(payload.new, 'INSERT');
+            if (record) addItem(record);
           } else if (payload.eventType === 'UPDATE') {
-            updateItem((payload.new as T).id, payload.new as Partial<T>);
+            const record = toRealtimeRecord<T>(payload.new, 'UPDATE');
+            if (record) updateItem(record.id, record);
           } else if (payload.eventType === 'DELETE') {
-            removeItem((payload.old as { id: string }).id);
+            const old = payload.old as Record<string, unknown>;
+            if (typeof old.id === 'string') removeItem(old.id);
           }
         }
       )

@@ -58,8 +58,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } else {
           setAuthState(null);
         }
-      } catch {
-        if (!resolvedRef.current) setAuthState(null);
+      } catch (err) {
+        console.error('[AuthProvider] Erro ao inicializar sessão:', err);
+        if (!cancelled && !resolvedRef.current) setAuthState(null);
       }
     }
 
