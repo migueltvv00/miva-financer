@@ -257,7 +257,7 @@ export function useMonthlyPlanData(
       console.error('Erro ao copiar plano mensal:', err);
       setError('Não foi possível copiar o plano para o próximo mês.');
     }
-  }, [monthKey, plan?.expected_income_cents, selectedMonth, userId]);
+  }, [monthKey, monthStartDay, plan?.expected_income_cents, selectedMonth, userId]);
 
   return {
     plan,

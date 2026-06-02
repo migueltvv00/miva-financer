@@ -205,7 +205,9 @@ export function useSavingsGoalData(
             source_id: createdGoal.id,
             emoji: values.emoji,
           });
-        } catch {}
+        } catch (syncErr) {
+          console.warn('Não foi possível sincronizar net worth ao criar objetivo:', syncErr);
+        }
       } catch (err) {
         console.error('Erro ao criar objetivo de poupança:', err);
         setGoals(previousGoals);
@@ -267,7 +269,9 @@ export function useSavingsGoalData(
             .eq('user_id', userId)
             .eq('source', 'savings_goal')
             .eq('source_id', id);
-        } catch {}
+        } catch (syncErr) {
+          console.warn('Não foi possível sincronizar net worth ao atualizar objetivo:', syncErr);
+        }
       } catch (err) {
         console.error('Erro ao atualizar objetivo de poupança:', err);
         setGoals(previousGoals);
@@ -309,7 +313,9 @@ export function useSavingsGoalData(
             .eq('user_id', userId)
             .eq('source', 'savings_goal')
             .eq('source_id', id);
-        } catch {}
+        } catch (syncErr) {
+          console.warn('Não foi possível sincronizar net worth ao eliminar objetivo:', syncErr);
+        }
       } catch (err) {
         console.error('Erro ao eliminar objetivo de poupança:', err);
         setGoals(previousGoals);

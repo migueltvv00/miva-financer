@@ -400,7 +400,7 @@ export function useInvestmentData(
         throw new Error(message);
       }
     },
-    [addStoredSnapshot, monthKey, setStoredSnapshots, storedSnapshots, updateStoredSnapshot, userId]
+    [accounts, addStoredSnapshot, monthKey, setStoredSnapshots, storedSnapshots, updateStoredSnapshot, userId]
   );
 
   const copyFromLastMonth = useCallback(() => {

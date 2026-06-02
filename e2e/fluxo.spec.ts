@@ -26,12 +26,6 @@ async function login(page: Page) {
   await page.waitForURL('/', { timeout: 15_000 });
 }
 
-// Helper: format cents for matching in the UI
-function formatForMatch(cents: number): string {
-  const euros = (cents / 100).toFixed(2).replace('.', ',');
-  return euros;
-}
-
 // ─────────────────────────────────────────────────────────────
 // AUTH SCENARIOS
 // ─────────────────────────────────────────────────────────────
@@ -189,7 +183,6 @@ test.describe('Dashboard', () => {
 
   test('should show spending trend sparklines', async ({ page }) => {
     // Look for trend-related elements (sparklines or insight text)
-    const trendElements = page.locator('text=média, text=Acima, text=Abaixo, text=Dentro');
     // May not be visible if no historical data, but page should still load
     await page.waitForTimeout(2_000);
   });
@@ -422,7 +415,7 @@ test.describe('PWA', () => {
     await login(page);
     await page.waitForTimeout(3_000);
 
-    const swRegistered = await page.evaluate(async () => {
+    await page.evaluate(async () => {
       if (!('serviceWorker' in navigator)) return false;
       const registrations = await navigator.serviceWorker.getRegistrations();
       return registrations.length > 0;

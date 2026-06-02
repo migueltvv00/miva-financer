@@ -44,11 +44,6 @@ interface PayslipImport {
   status: string;
 }
 
-interface CategoryRow {
-  id: string;
-  name: string;
-}
-
 // Last working day of a month (Mon–Fri)
 function lastWorkingDay(monthStr: string): string {
   const [year, month] = monthStr.split("-").map(Number);

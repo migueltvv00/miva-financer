@@ -184,7 +184,7 @@ export function useNetWorthData(
       assets: previousEntry.assets_json,
       liabilities: previousEntry.liabilities_json,
     };
-  }, [entries, selectedMonth]);
+  }, [entries, monthStartDay, selectedMonth]);
 
   const deleteEntry = useCallback(async () => {
     if (!userId) {

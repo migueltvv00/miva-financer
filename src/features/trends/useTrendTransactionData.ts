@@ -94,6 +94,7 @@ export function useTrendTransactionData(
       isActive = false;
     };
   }, [
+    monthStartDay,
     referenceDate,
     referenceMonthKey,
     setTrendTransactions,
