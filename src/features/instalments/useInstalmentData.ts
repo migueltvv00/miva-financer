@@ -95,9 +95,7 @@ export function useInstalmentData(
         setInstalments([]);
         setError('Não foi possível carregar as prestações.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

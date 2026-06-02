@@ -93,9 +93,7 @@ export function useBudgetData(
         setBudgets([]);
         setError('Não foi possível carregar os orçamentos.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

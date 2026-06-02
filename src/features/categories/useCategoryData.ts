@@ -55,9 +55,7 @@ export function useCategoryData(
 
         setError('Não foi possível carregar as categorias.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

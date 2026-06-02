@@ -70,7 +70,7 @@ export function useNetWorthItems(userId: string | null | undefined) {
         console.error('Erro ao carregar itens de patrimônio:', err);
         if (active) setItems([]);
       } finally {
-        if (active) setLoading(false);
+        setLoading(false);
       }
     };
 

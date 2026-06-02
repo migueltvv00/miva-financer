@@ -89,9 +89,7 @@ export function useIncomeSourceData(
         setSources([]);
         setError('Não foi possível carregar as fontes de rendimento.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

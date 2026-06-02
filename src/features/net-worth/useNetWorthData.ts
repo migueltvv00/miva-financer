@@ -90,9 +90,7 @@ export function useNetWorthData(
         setEntries([]);
         setError('Não foi possível carregar os registos de património líquido.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

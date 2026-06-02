@@ -82,9 +82,7 @@ export function useTrendTransactionData(
         setTrendTransactions([]);
         setError('Não foi possível carregar as tendências de despesa.');
       } finally {
-        if (isActive && requestId === requestIdRef.current) {
-          setTrendTransactionsLoading(false);
-        }
+        setTrendTransactionsLoading(false);
       }
     };
 

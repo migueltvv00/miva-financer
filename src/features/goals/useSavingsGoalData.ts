@@ -82,9 +82,7 @@ export function useSavingsGoalData(
         setGoals([]);
         setError('Não foi possível carregar os objetivos de poupança.');
       } finally {
-        if (isActive) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 

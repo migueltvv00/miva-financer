@@ -82,13 +82,8 @@ export function useTransactionData(
 
         setError('Não foi possível carregar as transações.');
       } finally {
-        const shouldUpdateState =
-          isMountedRef.current && requestId === requestIdRef.current;
-
-        if (shouldUpdateState) {
-          setLoading(false);
-          setIsRefreshing(false);
-        }
+        setLoading(false);
+        setIsRefreshing(false);
       }
     },
     [selectedMonth, setLoading, setTransactions, userId]
